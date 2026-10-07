@@ -8,3 +8,9 @@ target/
 
 # OS
 .DS_Store
+
+try.ts
+
+# Ignore test files
+try.rs
+try.ts
