@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Outdoor Quest Web Client</title>
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#1e1e2e">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1, h2, h3 {
+            color: #89b4fa;
+        }
+        .panel {
+            background-color: #313244;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        input, button {
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 4px;
+            border: 1px solid #45475a;
+            background-color: #181825;
+            color: #cdd6f4;
+        }
+        button {
+            background-color: #89b4fa;
+            color: #11111b;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #b4befe;
+        }
+        #log {
+            background-color: #11111b;
+            padding: 10px;
+            height: 150px;
+            overflow-y: scroll;
+            font-family: monospace;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .log-entry {
+            margin: 2px 0;
+            border-bottom: 1px solid #313244;
+            padding-bottom: 2px;
+        }
+        .error { color: #f38ba8; }
+        .success { color: #a6e3a1; }
+        .info { color: #89b4fa; }
+        .state {
+            background-color: #11111b;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>🌲 Outdoor Quest Web Frontend</h1>
+    
+    <div class="panel">
+        <h2>Connection</h2>
+        <input type="text" id="wsUrl" value="ws://localhost:3001/ws" style="width: 250px;">
+        <button onclick="connect()">Connect</button>
+        <span id="connStatus" style="margin-left: 10px; color: #f38ba8;">Disconnected</span>
+    </div>
+
+    <div class="panel">
+        <h2>Join / Create</h2>
+        <input type="text" id="playerName" placeholder="Player Name">
+        <button onclick="createGame()">Create Game</button>
+        <br>
+        <input type="text" id="roomCode" placeholder="Room Code (e.g. QUEST-1234)">
+        <button onclick="joinGame()">Join Game</button>
+    </div>
+
+    <div class="panel">
+        <h2>Game Actions</h2>
+        <p>Your Player ID: <span id="myPlayerId">None</span></p>
+        <button onclick="startGame()">Start Game (Host Only)</button>
+        <br>
+        <input type="text" id="proofInput" placeholder="Photo proof URL or description">
+        <button onclick="completeTask()">Complete Current Task</button>
+    </div>
+
+    <div class="panel">
+        <h2>Game Log</h2>
+        <div id="log"></div>
+    </div>
+
+    <div class="panel">
+        <h2>Current Game State (JSON)</h2>
+        <div id="gameState" class="state">Waiting for state...</div>
+    </div>
+
+    <script>
+        let ws = null;
+        let currentPlayerId = null;
+        let currentRoomCode = null;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateStateDisplay(state) {
+            document.getElementById('gameState').textContent = JSON.stringify(state, null, 2);
+            if (state && state.room_code) {
+                currentRoomCode = state.room_code;
+                document.getElementById('roomCode').value = currentRoomCode;
+            }
+        }
+
+        function connect() {
+            const url = document.getElementById('wsUrl').value;
+            if (ws) {
+                ws.close();
+            }
+            ws = new WebSocket(url);
+            
+            ws.onopen = () => {
+                document.getElementById('connStatus').textContent = 'Connected';
+                document.getElementById('connStatus').style.color = '#a6e3a1';
+                log('Connected to WebSocket server', 'success');
+            };
+
+            ws.onclose = () => {
+                document.getElementById('connStatus').textContent = 'Disconnected';
+                document.getElementById('connStatus').style.color = '#f38ba8';
+                log('Disconnected from server', 'error');
+                ws = null;
+            };
+
+            ws.onerror = (err) => {
+                log('WebSocket Error', 'error');
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                switch (data.type) {
+                    case 'GameCreated':
+                        currentPlayerId = data.payload.player_id;
+                        document.getElementById('myPlayerId').textContent = currentPlayerId;
+                        log(`Game created. Room Code: ${data.payload.room_code}`, 'success');
+                        updateStateDisplay(data.payload.state);
+                        break;
+                    
+                    case 'GameJoined':
+                        currentPlayerId = data.payload.player_id;
+                        document.getElementById('myPlayerId').textContent = currentPlayerId;
+                        log(`Joined room ${data.payload.room_code} successfully`, 'success');
+                        updateStateDisplay(data.payload.state);
+                        break;
+                    
+                    case 'StateUpdate':
+                        log(data.payload.log_message, 'info');
+                        updateStateDisplay(data.payload.state);
+                        break;
+                        
+                    case 'Error':
+                        log(`Error: ${data.payload.message}`, 'error');
+                        break;
+                        
+                    default:
+                        log(`Unknown message: ${event.data}`, 'error');
+                }
+            };
+        }
+
+        function sendMsg(type, payload) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected to server', 'error');
+                return;
+            }
+            ws.send(JSON.stringify({ type, payload }));
+        }
+
+        function createGame() {
+            const playerName = document.getElementById('playerName').value || 'Guest';
+            sendMsg('CreateGame', { player_name: playerName });
+        }
+
+        function joinGame() {
+            const playerName = document.getElementById('playerName').value || 'Guest';
+            const roomCode = document.getElementById('roomCode').value;
+            if (!roomCode) {
+                log('Please enter a room code', 'error');
+                return;
+            }
+            sendMsg('JoinGame', { room_code: roomCode, player_name: playerName });
+        }
+
+        function startGame() {
+            if (!currentRoomCode || !currentPlayerId) {
+                log('Join or create a game first', 'error');
+                return;
+            }
+            sendMsg('StartGame', { 
+                room_code: currentRoomCode, 
+                player_id: currentPlayerId 
+            });
+        }
+
+        function completeTask() {
+            if (!currentRoomCode || !currentPlayerId) {
+                log('Join or create a game first', 'error');
+                return;
+            }
+            let proof = document.getElementById('proofInput').value;
+            if (!proof) proof = null;
+            
+            sendMsg('CompleteTask', { 
+                room_code: currentRoomCode, 
+                player_id: currentPlayerId,
+                proof: proof
+            });
+            document.getElementById('proofInput').value = '';
+        }
+
+        // Register Service Worker for PWA
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('ServiceWorker registered'))
+                    .catch(err => console.log('ServiceWorker registration failed: ', err));
+            });
+        }
+    </script>
+</body>
+</html>
+
