@@ -13,12 +13,16 @@ function App() {
   const [proof, setProof] = useState('');
   const [displayedLore, setDisplayedLore] = useState<string | null>(null);
 
+  const [wsReady, setWsReady] = useState(false);
   const loreMaster = useLoreMaster();
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     const socket = new WebSocket('wss://hacktober-fest-week-2-7n52.onrender.com/ws');
     
+    socket.onopen = () => setWsReady(true);
+    socket.onclose = () => setWsReady(false);
+
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'StateUpdate' || data.type === 'GameCreated' || data.type === 'GameJoined') {
@@ -84,12 +88,12 @@ function App() {
         
         <div style={{ marginTop: 20 }}>
           <input placeholder="Player Name" value={playerName} onChange={e => setPlayerName(e.target.value)} />
-          <button onClick={createGame}>Create Game</button>
+          <button onClick={createGame} disabled={!wsReady || !playerName}>Create Game</button>
         </div>
         
         <div style={{ marginTop: 20 }}>
           <input placeholder="Room Code" value={roomCode} onChange={e => setRoomCode(e.target.value)} />
-          <button onClick={joinGame}>Join Game</button>
+          <button onClick={joinGame} disabled={!wsReady || !playerName || !roomCode}>Join Game</button>
         </div>
       </div>
     );
