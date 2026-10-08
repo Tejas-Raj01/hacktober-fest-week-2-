@@ -14,6 +14,12 @@ export const GemmaDownloadBar: React.FC<Props> = ({ loreMaster }) => {
     }
   }, [status, loadModel]);
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      loadModel(e.target.files[0]);
+    }
+  };
+
   if (status === 'unsupported') {
     return (
       <div style={{ padding: 10, background: '#f38ba8', color: '#11111b', borderRadius: 4 }}>
@@ -24,8 +30,16 @@ export const GemmaDownloadBar: React.FC<Props> = ({ loreMaster }) => {
 
   if (status === 'error') {
     return (
-      <div style={{ padding: 10, background: '#f38ba8', color: '#11111b', borderRadius: 4 }}>
-        <strong>Error Loading Gemma:</strong> {errorMessage}
+      <div style={{ padding: 10, background: '#f38ba8', color: '#11111b', borderRadius: 4, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div><strong>Error Loading Gemma:</strong> {errorMessage}</div>
+        <div>
+          <button onClick={() => loadModel()} style={{ marginRight: 10 }}>Retry Download</button>
+          <span>OR</span>
+          <label style={{ marginLeft: 10, background: '#313244', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', color: '#cdd6f4' }}>
+            Load Local .task File
+            <input type="file" accept=".task" style={{ display: 'none' }} onChange={handleFileChange} />
+          </label>
+        </div>
       </div>
     );
   }
@@ -39,8 +53,16 @@ export const GemmaDownloadBar: React.FC<Props> = ({ loreMaster }) => {
   }
 
   return (
-    <div style={{ padding: 10, background: '#89b4fa', color: '#11111b', borderRadius: 4 }}>
-      <strong>Downloading Lore Master (WebGPU Model)...</strong> {progress}%
+    <div style={{ padding: 10, background: '#89b4fa', color: '#11111b', borderRadius: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div>
+        <strong>Downloading Lore Master (WebGPU Model)...</strong> {progress}%
+      </div>
+      <div>
+        <label style={{ background: '#313244', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', color: '#cdd6f4', fontSize: '0.9em' }}>
+          Load Local File Instead
+          <input type="file" accept=".task" style={{ display: 'none' }} onChange={handleFileChange} />
+        </label>
+      </div>
     </div>
   );
 };

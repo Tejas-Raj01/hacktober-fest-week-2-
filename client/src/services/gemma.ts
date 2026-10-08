@@ -9,7 +9,7 @@ export class GemmaService {
     return 'gpu' in navigator;
   }
 
-  static async initializeGemma(onProgress?: (progressPercent: number) => void): Promise<void> {
+  static async initializeGemma(onProgress?: (progressPercent: number) => void, customModelUrl?: string): Promise<void> {
     if (this.isReady || this.instance) return;
     if (this.isInitializing) return;
     
@@ -28,7 +28,7 @@ export class GemmaService {
       
       this.instance = await LlmInference.createFromOptions(genai, {
         baseOptions: {
-          modelAssetPath: "https://huggingface.co/realbyte/gemma-3n-E2B-it-int4-mediapipe/resolve/main/gemma-3n-E2B-it-int4.task"
+          modelAssetPath: customModelUrl || "https://huggingface.co/realbyte/gemma-3n-E2B-it-int4-mediapipe/resolve/main/gemma-3n-E2B-it-int4.task"
         },
         maxTokens: 120,
         temperature: 0.7,

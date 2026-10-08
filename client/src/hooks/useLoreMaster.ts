@@ -9,8 +9,10 @@ export function useLoreMaster() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [latestLore, setLatestLore] = useState<string | null>(null);
 
-  const loadModel = useCallback(async () => {
+  const loadModel = useCallback(async (localFile?: File) => {
     setStatus('checking-gpu');
+    setErrorMessage(null);
+    setProgress(0);
     
     if (!GemmaService.checkWebGPUSupport()) {
       setStatus('unsupported');
@@ -20,7 +22,11 @@ export function useLoreMaster() {
 
     setStatus('downloading');
     try {
-      await GemmaService.initializeGemma((p) => setProgress(p));
+      let customUrl = undefined;
+      if (localFile) {
+        customUrl = URL.createObjectURL(localFile);
+      }
+      await GemmaService.initializeGemma((p) => setProgress(p), customUrl);
       setStatus('ready');
     } catch (e: any) {
       setStatus('error');
