@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react';
 import { GemmaService } from '../services/gemma';
 
+import { ModelDownloader } from '../services/ModelDownloader';
+
 type Status = 'idle' | 'checking-gpu' | 'downloading' | 'ready' | 'generating' | 'error' | 'unsupported';
 
 export function useLoreMaster() {
@@ -25,8 +27,19 @@ export function useLoreMaster() {
       let customUrl = undefined;
       if (localFile) {
         customUrl = URL.createObjectURL(localFile);
+      } else {
+        // Use our bulletproof resumable downloader instead of relying on MediaPipe's single fetch
+        customUrl = await ModelDownloader.downloadModelResumable(
+          "https://huggingface.co/realbyte/gemma-3n-E2B-it-int4-mediapipe/resolve/main/gemma-3n-E2B-it-int4.task",
+          (p) => setProgress(p)
+        );
       }
-      await GemmaService.initializeGemma((p) => setProgress(p), customUrl);
+      
+      await GemmaService.initializeGemma((p) => {
+        // Only update progress from GemmaService if we didn't just download it manually
+        if (localFile) setProgress(p); 
+      }, customUrl);
+      
       setStatus('ready');
     } catch (e: any) {
       setStatus('error');
