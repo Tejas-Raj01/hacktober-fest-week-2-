@@ -39,8 +39,8 @@ async fn main() {
 
     let listener = listener.expect("Could not find an available port to bind");
 
-    let server_url = format!("http://localhost:{}", actual_port);
-    let app_state = AppState::new(server_url);
+    let server_url = std::env::var("CLIENT_URL").unwrap_or_else(|_| "https://hacktober-fest-week-2.onrender.com".to_string());
+    let app_state = AppState::new(server_url).await;
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -137,8 +137,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                     let _ = sender.send(Message::Text(serde_json::to_string(&response).unwrap())).await;
                                 }
                             }
-                            Ok(ClientMessage::CompleteTask { room_code, player_id, proof }) => {
-                                if let Err(err_msg) = state.complete_task(&room_code, &player_id, proof).await {
+                            Ok(ClientMessage::CompleteTask { room_code, player_id, proof, lore }) => {
+                                if let Err(err_msg) = state.complete_task(&room_code, &player_id, proof, lore).await {
                                     let response = ServerMessage::Error { message: err_msg };
                                     let _ = sender.send(Message::Text(serde_json::to_string(&response).unwrap())).await;
                                 }
