@@ -24,12 +24,13 @@ export function useLoreMaster() {
 
     setStatus('downloading');
     try {
-      let customUrl = undefined;
+      let modelSource: File | Blob | string | undefined = undefined;
+      
       if (localFile) {
-        customUrl = URL.createObjectURL(localFile);
+        modelSource = localFile; // Pass the File object directly
       } else {
-        // Use our bulletproof resumable downloader instead of relying on MediaPipe's single fetch
-        customUrl = await ModelDownloader.downloadModelResumable(
+        // Use our bulletproof resumable downloader
+        modelSource = await ModelDownloader.downloadModelResumable(
           "https://huggingface.co/realbyte/gemma-3n-E2B-it-int4-mediapipe/resolve/main/gemma-3n-E2B-it-int4.task",
           (p) => setProgress(p)
         );
@@ -38,7 +39,7 @@ export function useLoreMaster() {
       await GemmaService.initializeGemma((p) => {
         // Only update progress from GemmaService if we didn't just download it manually
         if (localFile) setProgress(p); 
-      }, customUrl);
+      }, modelSource);
       
       setStatus('ready');
     } catch (e: any) {

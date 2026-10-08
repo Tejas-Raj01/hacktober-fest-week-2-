@@ -9,7 +9,7 @@ export class GemmaService {
     return 'gpu' in navigator;
   }
 
-  static async initializeGemma(onProgress?: (progressPercent: number) => void, customModelUrl?: string): Promise<void> {
+  static async initializeGemma(onProgress?: (progressPercent: number) => void, modelSource?: string | File | Blob): Promise<void> {
     if (this.isReady || this.instance) return;
     if (this.isInitializing) return;
     
@@ -26,10 +26,18 @@ export class GemmaService {
       
       if (onProgress) onProgress(10); 
       
+      const baseOptions: any = {};
+      
+      if (modelSource instanceof Blob || modelSource instanceof File) {
+        baseOptions.modelAssetBuffer = modelSource.stream().getReader();
+      } else if (typeof modelSource === 'string') {
+        baseOptions.modelAssetPath = modelSource;
+      } else {
+        baseOptions.modelAssetPath = "https://huggingface.co/realbyte/gemma-3n-E2B-it-int4-mediapipe/resolve/main/gemma-3n-E2B-it-int4.task";
+      }
+
       this.instance = await LlmInference.createFromOptions(genai, {
-        baseOptions: {
-          modelAssetPath: customModelUrl || "https://huggingface.co/realbyte/gemma-3n-E2B-it-int4-mediapipe/resolve/main/gemma-3n-E2B-it-int4.task"
-        },
+        baseOptions,
         maxTokens: 120,
         temperature: 0.7,
         topK: 40

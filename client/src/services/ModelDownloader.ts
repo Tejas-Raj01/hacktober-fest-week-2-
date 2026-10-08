@@ -2,7 +2,7 @@ export class ModelDownloader {
   static async downloadModelResumable(
     url: string,
     onProgress: (progress: number) => void
-  ): Promise<string> {
+  ): Promise<Blob> {
     console.log("Starting resumable download...");
     
     // 1. Get total file size
@@ -56,6 +56,6 @@ export class ModelDownloader {
 
     console.log("Download complete! Stitching chunks...");
     const blob = new Blob(chunks, { type: 'application/octet-stream' });
-    return URL.createObjectURL(blob);
+    return blob;
   }
 }
