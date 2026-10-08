@@ -19,13 +19,13 @@ export class ModelDownloader {
 
     while (downloadedBytes < totalBytes && retries > 0) {
       try {
-        console.log(\`Fetching from byte \${downloadedBytes}...\`);
+        console.log(`Fetching from byte ${downloadedBytes}...`);
         const response = await fetch(url, {
-          headers: downloadedBytes > 0 ? { 'Range': \`bytes=\${downloadedBytes}-\` } : {}
+          headers: downloadedBytes > 0 ? { 'Range': `bytes=${downloadedBytes}-` } : {}
         });
 
         if (!response.ok && response.status !== 206 && response.status !== 200) {
-          throw new Error(\`Server returned status \${response.status}\`);
+          throw new Error(`Server returned status ${response.status}`);
         }
 
         const reader = response.body?.getReader();
@@ -42,7 +42,7 @@ export class ModelDownloader {
           }
         }
       } catch (e) {
-        console.warn(\`Network drop detected. Retries left: \${retries - 1}\`, e);
+        console.warn(`Network drop detected. Retries left: ${retries - 1}`, e);
         retries--;
         if (retries === 0) throw new Error("Download failed after maximum retries.");
         // Wait 2 seconds before attempting to resume
