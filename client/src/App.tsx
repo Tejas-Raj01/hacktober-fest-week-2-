@@ -100,29 +100,88 @@ function App() {
   }
 
   return (
-    <div className="App" style={{ padding: 20 }}>
-      <h1>🌲 Room: {gameState.room_code}</h1>
+    <div className="App" style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
       <GemmaDownloadBar loreMaster={loreMaster} />
       
-      <h2>Status: {gameState.status}</h2>
+      <div style={{ background: '#1e1e2e', padding: '20px', borderRadius: '12px', textAlign: 'center', margin: '20px 0', border: '1px solid #313244' }}>
+        <h2 style={{ margin: '0 0 15px 0', color: '#a6adc8', fontSize: '1.2em' }}>Room Code</h2>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px' }}>
+           <code style={{ fontSize: '2.5em', background: '#313244', padding: '10px 25px', borderRadius: '8px', color: '#a6e3a1', fontWeight: 'bold', letterSpacing: '2px' }}>
+              {gameState.room_code}
+           </code>
+           <button 
+             onClick={() => navigator.clipboard.writeText(gameState.room_code)}
+             style={{ padding: '10px 15px', background: '#45475a', color: '#cdd6f4', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+           >
+             Copy
+           </button>
+        </div>
+      </div>
       
       {gameState.status === 'Lobby' && (
-        <button onClick={startGame}>Start Game</button>
+        <div style={{ textAlign: 'center', padding: '30px' }}>
+          <h2 style={{ color: '#cdd6f4' }}>Waiting for players...</h2>
+          <button 
+            onClick={startGame}
+            style={{ padding: '15px 30px', fontSize: '1.2em', background: '#89b4fa', color: '#11111b', fontWeight: 'bold', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+          >
+            Start Game
+          </button>
+        </div>
       )}
 
       {gameState.status === 'InProgress' && (
-        <div style={{ background: '#313244', padding: 15, borderRadius: 8, marginTop: 20 }}>
-          <h3>Current Task: {gameState.tasks[gameState.current_task_index].title}</h3>
-          <p>{gameState.tasks[gameState.current_task_index].description}</p>
+        <div style={{ 
+          background: 'linear-gradient(145deg, #313244, #1e1e2e)', 
+          padding: '40px', 
+          borderRadius: '16px', 
+          marginTop: '30px',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+          border: '1px solid #45475a'
+        }}>
+          <div style={{ color: '#f9e2af', fontSize: '0.9em', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '10px', fontWeight: 'bold' }}>
+            Active Quest
+          </div>
+          <h2 style={{ color: '#cdd6f4', margin: '0 0 15px 0', fontSize: '2.2em' }}>
+            {gameState.tasks[gameState.current_task_index].title}
+          </h2>
+          <p style={{ color: '#a6adc8', fontSize: '1.2em', lineHeight: '1.6', marginBottom: '30px' }}>
+            {gameState.tasks[gameState.current_task_index].description}
+          </p>
           
-          <input 
-            placeholder="Photo Proof URL" 
-            value={proof} 
-            onChange={e => setProof(e.target.value)} 
-          />
-          <button onClick={completeTask} disabled={loreMaster.status === 'generating'}>
-            {loreMaster.status === 'generating' ? 'Consulting Lore Master...' : 'Complete Task'}
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            <input 
+              placeholder="Paste Photo Proof URL here..." 
+              value={proof} 
+              onChange={e => setProof(e.target.value)} 
+              style={{
+                padding: '15px',
+                borderRadius: '8px',
+                border: '1px solid #585b70',
+                background: '#11111b',
+                color: '#cdd6f4',
+                fontSize: '1.1em',
+                outline: 'none'
+              }}
+            />
+            <button 
+              onClick={completeTask} 
+              disabled={loreMaster.status === 'generating' || !proof}
+              style={{
+                background: loreMaster.status === 'generating' ? '#585b70' : '#89b4fa',
+                color: '#11111b',
+                padding: '15px',
+                fontSize: '1.1em',
+                fontWeight: 'bold',
+                borderRadius: '8px',
+                border: 'none',
+                cursor: (loreMaster.status === 'generating' || !proof) ? 'not-allowed' : 'pointer',
+                transition: 'background 0.2s'
+              }}
+            >
+              {loreMaster.status === 'generating' ? '✨ Consulting Lore Master...' : 'Complete Quest'}
+            </button>
+          </div>
         </div>
       )}
 
