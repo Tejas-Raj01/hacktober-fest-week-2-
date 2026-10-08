@@ -80,6 +80,21 @@ function App() {
     setProof('');
   };
 
+  const handleProofUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setProof(ev.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const leaveGame = () => {
+    window.location.reload();
+  };
+
   if (!gameState) {
     return (
       <div className="App" style={{ padding: 20 }}>
@@ -99,10 +114,22 @@ function App() {
     );
   }
 
+  const isHost = gameState.players?.find((p: any) => p.id === playerId)?.is_host;
+
   return (
     <div className="App" style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
       <GemmaDownloadBar loreMaster={loreMaster} />
       
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '20px 0' }}>
+        <button 
+          onClick={leaveGame}
+          style={{ padding: '10px 15px', background: '#f38ba8', color: '#11111b', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          Leave Game
+        </button>
+        <h3 style={{ color: '#cdd6f4', margin: 0 }}>Status: {gameState.status}</h3>
+      </div>
+
       <div style={{ background: '#1e1e2e', padding: '20px', borderRadius: '12px', textAlign: 'center', margin: '20px 0', border: '1px solid #313244' }}>
         <h2 style={{ margin: '0 0 15px 0', color: '#a6adc8', fontSize: '1.2em' }}>Room Code</h2>
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px' }}>
@@ -120,13 +147,17 @@ function App() {
       
       {gameState.status === 'Lobby' && (
         <div style={{ textAlign: 'center', padding: '30px' }}>
-          <h2 style={{ color: '#cdd6f4' }}>Waiting for players...</h2>
-          <button 
-            onClick={startGame}
-            style={{ padding: '15px 30px', fontSize: '1.2em', background: '#89b4fa', color: '#11111b', fontWeight: 'bold', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
-          >
-            Start Game
-          </button>
+          <h2 style={{ color: '#cdd6f4', marginBottom: '20px' }}>Waiting for players...</h2>
+          {isHost ? (
+            <button 
+              onClick={startGame}
+              style={{ padding: '15px 30px', fontSize: '1.2em', background: '#89b4fa', color: '#11111b', fontWeight: 'bold', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+            >
+              Start Game
+            </button>
+          ) : (
+            <p style={{ color: '#a6adc8', fontSize: '1.2em' }}>Waiting for the host to start the game...</p>
+          )}
         </div>
       )}
 
@@ -150,20 +181,24 @@ function App() {
           </p>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-            <input 
-              placeholder="Paste Photo Proof URL here..." 
-              value={proof} 
-              onChange={e => setProof(e.target.value)} 
-              style={{
-                padding: '15px',
-                borderRadius: '8px',
-                border: '1px solid #585b70',
-                background: '#11111b',
-                color: '#cdd6f4',
-                fontSize: '1.1em',
-                outline: 'none'
-              }}
-            />
+            <label style={{
+              padding: '15px',
+              borderRadius: '8px',
+              border: '2px dashed #585b70',
+              background: '#11111b',
+              color: '#cdd6f4',
+              fontSize: '1.1em',
+              textAlign: 'center',
+              cursor: 'pointer'
+            }}>
+              {proof ? "Photo Uploaded! Ready to complete." : "📸 Click to Upload Photo Proof"}
+              <input 
+                type="file" 
+                accept="image/*"
+                onChange={handleProofUpload} 
+                style={{ display: 'none' }}
+              />
+            </label>
             <button 
               onClick={completeTask} 
               disabled={loreMaster.status === 'generating' || !proof}
@@ -181,6 +216,20 @@ function App() {
             >
               {loreMaster.status === 'generating' ? '✨ Consulting Lore Master...' : 'Complete Quest'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {gameState.players && gameState.players.length > 0 && (
+        <div style={{ background: '#1e1e2e', padding: '20px', borderRadius: '12px', marginTop: '30px', border: '1px solid #313244' }}>
+          <h3 style={{ margin: '0 0 15px 0', color: '#a6adc8' }}>Scoreboard</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {gameState.players.map((p: any) => (
+              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#313244', borderRadius: '6px' }}>
+                <span style={{ color: '#cdd6f4', fontWeight: 'bold' }}>{p.name} {p.is_host && '👑'}</span>
+                <span style={{ color: '#a6e3a1', fontWeight: 'bold' }}>{p.score} pts</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
