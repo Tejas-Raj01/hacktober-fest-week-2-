@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useLoreMaster } from '../hooks/useLoreMaster';
 
 interface Props {
@@ -30,7 +30,7 @@ export const GemmaDownloadBar: React.FC<Props> = ({ loreMaster }) => {
       </div>
     );
   }
-    if (e.target.files && e.target.files[0]) {
+
   if (status === 'unsupported') {
     return (
       <div style={{ padding: 10, background: '#f38ba8', color: '#11111b', borderRadius: 4 }}>
