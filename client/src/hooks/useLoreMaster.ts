@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { GemmaService } from '../services/gemma';
 
 import { ModelDownloader } from '../services/ModelDownloader';
@@ -11,7 +11,16 @@ export function useLoreMaster() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [latestLore, setLatestLore] = useState<string | null>(null);
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const loadModel = useCallback(async (localFile?: File) => {
+    // Abort any ongoing download
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     setStatus('checking-gpu');
     setErrorMessage(null);
     setProgress(0);
@@ -32,7 +41,8 @@ export function useLoreMaster() {
         // Use our bulletproof resumable downloader
         modelSource = await ModelDownloader.downloadModelResumable(
           "https://huggingface.co/realbyte/gemma-3n-E2B-it-int4-mediapipe/resolve/main/gemma-3n-E2B-it-int4.task",
-          (p) => setProgress(p)
+          (p) => setProgress(p),
+          abortController.signal
         );
       }
       
@@ -43,8 +53,14 @@ export function useLoreMaster() {
       
       setStatus('ready');
     } catch (e: any) {
+      if (e.message === "AbortError") return;
       setStatus('error');
-      setErrorMessage(e.message || "Failed to load Gemma weights.");
+      
+      let errMsg = e.message || "Failed to load Gemma weights.";
+      if (errMsg.includes("Array buffer allocation failed")) {
+        errMsg = "Out of Memory: Your browser does not have enough free RAM to load this 1.3GB AI model. Please close other tabs and try again, or use a 64-bit browser.";
+      }
+      setErrorMessage(errMsg);
     }
   }, []);
 

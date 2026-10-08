@@ -1,12 +1,13 @@
 export class ModelDownloader {
   static async downloadModelResumable(
     url: string,
-    onProgress: (progress: number) => void
+    onProgress: (progress: number) => void,
+    signal?: AbortSignal
   ): Promise<Blob> {
     console.log("Starting resumable download...");
     
     // 1. Get total file size
-    const headResponse = await fetch(url, { method: 'HEAD' });
+    const headResponse = await fetch(url, { method: 'HEAD', signal });
     const contentLength = headResponse.headers.get('content-length');
     if (!contentLength) {
       throw new Error("Could not determine file size. Server must support Content-Length.");
@@ -19,9 +20,11 @@ export class ModelDownloader {
 
     while (downloadedBytes < totalBytes && retries > 0) {
       try {
+        if (signal?.aborted) throw new Error("AbortError");
         console.log(`Fetching from byte ${downloadedBytes}...`);
         const response = await fetch(url, {
-          headers: downloadedBytes > 0 ? { 'Range': `bytes=${downloadedBytes}-` } : {}
+          headers: downloadedBytes > 0 ? { 'Range': `bytes=${downloadedBytes}-` } : {},
+          signal
         });
 
         if (!response.ok && response.status !== 206 && response.status !== 200) {
@@ -32,6 +35,11 @@ export class ModelDownloader {
         if (!reader) throw new Error("Could not get response reader");
 
         while (true) {
+          if (signal?.aborted) {
+            reader.cancel();
+            chunks.length = 0; // Free memory immediately
+            throw new Error("AbortError");
+          }
           const { done, value } = await reader.read();
           if (done) break;
           
@@ -41,7 +49,8 @@ export class ModelDownloader {
             onProgress(Math.round((downloadedBytes / totalBytes) * 100));
           }
         }
-      } catch (e) {
+      } catch (e: any) {
+        if (e.message === "AbortError") throw e;
         console.warn(`Network drop detected. Retries left: ${retries - 1}`, e);
         retries--;
         if (retries === 0) throw new Error("Download failed after maximum retries.");
