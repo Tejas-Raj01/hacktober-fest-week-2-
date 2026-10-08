@@ -28,7 +28,7 @@ export class GemmaService {
       
       const baseOptions: any = {};
       
-      if (modelSource instanceof Blob || modelSource instanceof File) {
+      if (modelSource && typeof modelSource !== 'string') {
         baseOptions.modelAssetBuffer = modelSource.stream().getReader();
       } else if (typeof modelSource === 'string') {
         baseOptions.modelAssetPath = modelSource;

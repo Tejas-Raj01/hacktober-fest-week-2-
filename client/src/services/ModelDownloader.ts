@@ -14,7 +14,7 @@ export class ModelDownloader {
     const totalBytes = Number(contentLength);
     
     let downloadedBytes = 0;
-    const chunks: Uint8Array[] = [];
+    const chunks: BlobPart[] = [];
     let retries = 10; // Allow up to 10 network drops
 
     while (downloadedBytes < totalBytes && retries > 0) {
