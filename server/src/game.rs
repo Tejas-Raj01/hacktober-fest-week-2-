@@ -55,7 +55,8 @@ pub enum ClientMessage {
     CreateGame { player_name: String },
     JoinGame { room_code: String, player_name: String },
     StartGame { room_code: String, player_id: String },
-    CompleteTask { room_code: String, player_id: String, proof: Option<String>, lore: Option<String> },
+    CompleteTask { room_code: String, player_id: String, proof: Option<String>, task_index: Option<usize> },
+    SyncQueue { actions: Vec<ClientMessage> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,7 +283,7 @@ impl AppState {
         room_code: &str,
         player_id: &str,
         proof: Option<String>,
-        lore: Option<String>,
+        task_index: Option<usize>,
     ) -> Result<GameState, String> {
         let mut rooms = self.rooms.write().await;
         let room = rooms
@@ -291,6 +292,13 @@ impl AppState {
 
         if room.state.status != GameStatus::InProgress {
             return Err("Game is not currently in progress.".to_string());
+        }
+
+        if let Some(idx) = task_index {
+            if idx < room.state.current_task_index {
+                // Task was already completed by someone else, ignore this retroactive sync
+                return Ok(room.state.clone());
+            }
         }
 
         let player_index = room
@@ -308,12 +316,48 @@ impl AppState {
         room.state.players[player_index].score += task_points;
         let player_name = room.state.players[player_index].name.clone();
 
+        // HF API call for lore
+        let mut final_lore = None;
+        if room.state.status == GameStatus::InProgress {
+             let prompt = format!("The player {} has just found a {} in the wild. Write a 2-sentence epic fantasy lore congratulating them.", player_name, task_title);
+             let hf_token = std::env::var("HF_TOKEN").unwrap_or_default();
+             
+             if !hf_token.is_empty() {
+                 let client = reqwest::Client::new();
+                 let res = client.post("https://api-inference.huggingface.co/models/google/gemma-2-2b-it")
+                     .header("Authorization", format!("Bearer {}", hf_token))
+                     .json(&serde_json::json!({
+                         "inputs": prompt,
+                         "parameters": {
+                             "max_new_tokens": 100,
+                             "return_full_text": false
+                         }
+                     }))
+                     .send()
+                     .await;
+                     
+                 if let Ok(response) = res {
+                     if let Ok(mut json_res) = response.json::<Vec<serde_json::Value>>().await {
+                         if let Some(first) = json_res.pop() {
+                             if let Some(text) = first.get("generated_text").and_then(|t| t.as_str()) {
+                                 final_lore = Some(text.trim().to_string());
+                             }
+                         }
+                     }
+                 }
+             }
+             
+             if final_lore.is_none() {
+                 final_lore = Some(format!("The Lore Master is pleased! A mystical {} radiates power in the hands of {}.", task_title, player_name));
+             }
+        }
+
         let proof_text = proof.clone().unwrap_or_else(|| "📷 Verified Photo Proof".to_string());
         room.state.last_proof = Some(TaskProof {
             player_name: player_name.clone(),
             task_title: task_title.clone(),
             proof: proof_text.clone(),
-            lore: lore.clone(),
+            lore: final_lore,
         });
 
         let log_msg: String;

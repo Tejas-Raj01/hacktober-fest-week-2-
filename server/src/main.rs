@@ -137,10 +137,17 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                     let _ = sender.send(Message::Text(serde_json::to_string(&response).unwrap())).await;
                                 }
                             }
-                            Ok(ClientMessage::CompleteTask { room_code, player_id, proof, lore }) => {
-                                if let Err(err_msg) = state.complete_task(&room_code, &player_id, proof, lore).await {
+                            Ok(ClientMessage::CompleteTask { room_code, player_id, proof, task_index }) => {
+                                if let Err(err_msg) = state.complete_task(&room_code, &player_id, proof, task_index).await {
                                     let response = ServerMessage::Error { message: err_msg };
                                     let _ = sender.send(Message::Text(serde_json::to_string(&response).unwrap())).await;
+                                }
+                            }
+                            Ok(ClientMessage::SyncQueue { actions }) => {
+                                for action in actions {
+                                    if let ClientMessage::CompleteTask { room_code, player_id, proof, task_index } = action {
+                                        let _ = state.complete_task(&room_code, &player_id, proof, task_index).await;
+                                    }
                                 }
                             }
                             Err(e) => {
