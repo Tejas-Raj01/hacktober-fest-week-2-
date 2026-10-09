@@ -1,7 +1,7 @@
 import { pipeline, env } from '@xenova/transformers';
 
-// Configure transformers.js to run locally without hitting the Hub unnecessarily
-env.allowLocalModels = true;
+// Configure transformers.js to fetch from Hub and cache locally
+env.allowLocalModels = false;
 env.useBrowserCache = true;
 
 class VisionService {
@@ -13,8 +13,8 @@ class VisionService {
     this.isInitializing = true;
     
     try {
-      // Use a tiny, fast vision model suitable for mobile
-      this.instance = await pipeline('image-classification', 'Xenova/mobilenet_v1_1.0_224');
+      // Use resnet-50 which is a verified, lightweight vision model available on Xenova's hub
+      this.instance = await pipeline('image-classification', 'Xenova/resnet-50');
     } catch (error) {
       console.error("Failed to initialize vision model:", error);
     } finally {
