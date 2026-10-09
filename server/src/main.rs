@@ -17,27 +17,14 @@ use tower_http::cors::{Any, CorsLayer};
 
 #[tokio::main]
 async fn main() {
-    let initial_port: u16 = std::env::var("PORT")
+    let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(3001);
-    let host = "0.0.0.0";
-
-    let mut listener = None;
-    let mut actual_port = initial_port;
-
-    for p in initial_port..=initial_port + 20 {
-        let addr_str = format!("{}:{}", host, p);
-        if let Ok(addr) = addr_str.parse::<SocketAddr>() {
-            if let Ok(l) = tokio::net::TcpListener::bind(addr).await {
-                listener = Some(l);
-                actual_port = p;
-                break;
-            }
-        }
-    }
-
-    let listener = listener.expect("Could not find an available port to bind");
+        .unwrap_or(8080);
+    
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let actual_port = port;
 
     let server_url = std::env::var("CLIENT_URL").unwrap_or_else(|_| "https://hacktober-fest-week-2.onrender.com".to_string());
     let app_state = AppState::new(server_url).await;

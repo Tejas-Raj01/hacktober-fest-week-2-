@@ -90,32 +90,45 @@ pub struct Room {
 #[derive(Clone)]
 pub struct AppState {
     pub rooms: Arc<RwLock<HashMap<String, Room>>>,
-    pub collection: Collection<GameState>,
+    pub collection: Option<Collection<GameState>>,
     pub server_url: String,
 }
 
 impl AppState {
     pub async fn new(server_url: String) -> Self {
         dotenv::dotenv().ok();
-        let uri = env::var("MONGODB_URI").unwrap_or_else(|_| "mongodb://localhost:27017".to_string());
+        let uri = env::var("MONGODB_URI").unwrap_or_default();
         
-        let client = Client::with_uri_str(&uri).await.expect("Failed to initialize MongoDB client");
-        let db = client.database("outdoor_quest");
-        let collection: Collection<GameState> = db.collection("rooms");
-
+        let mut collection = None;
         let mut rooms_map = HashMap::new();
-        
-        // Load active rooms from DB
-        let mut cursor = collection.find(mongodb::bson::doc! {}).await.expect("Failed to query DB");
-        while let Some(state) = cursor.try_next().await.expect("Failed to get next state") {
-            let (tx, _) = broadcast::channel(100);
-            rooms_map.insert(state.room_code.clone(), Room {
-                state,
-                sender: tx,
-            });
-        }
 
-        println!("Loaded {} rooms from MongoDB", rooms_map.len());
+        if !uri.is_empty() {
+            match Client::with_uri_str(&uri).await {
+                Ok(client) => {
+                    let db = client.database("outdoor_quest");
+                    let coll: Collection<GameState> = db.collection("rooms");
+                    
+                    // Load active rooms from DB
+                    match coll.find(mongodb::bson::doc! {}).await {
+                        Ok(mut cursor) => {
+                            while let Ok(Some(state)) = cursor.try_next().await {
+                                let (tx, _) = broadcast::channel(100);
+                                rooms_map.insert(state.room_code.clone(), Room {
+                                    state,
+                                    sender: tx,
+                                });
+                            }
+                            println!("Loaded {} rooms from MongoDB", rooms_map.len());
+                            collection = Some(coll);
+                        },
+                        Err(e) => eprintln!("Warning: Failed to query DB: {}", e),
+                    }
+                }
+                Err(e) => eprintln!("Warning: Failed to initialize MongoDB client: {}", e),
+            }
+        } else {
+            eprintln!("Warning: MONGODB_URI is empty. Falling back to in-memory store.");
+        }
 
         Self {
             rooms: Arc::new(RwLock::new(rooms_map)),
@@ -189,7 +202,9 @@ impl AppState {
         };
         
         // Save to MongoDB
-        let _ = self.collection.insert_one(&state).await;
+        if let Some(col) = &self.collection {
+            let _ = col.insert_one(&state).await;
+        }
 
         let (tx, _) = broadcast::channel(100);
 
@@ -227,7 +242,9 @@ impl AppState {
         // Update DB
         let filter = mongodb::bson::doc! { "room_code": &room.state.room_code };
         let update = mongodb::bson::doc! { "$set": mongodb::bson::to_document(&room.state).unwrap() };
-        let _ = self.collection.update_one(filter, update).await;
+        if let Some(col) = &self.collection {
+            let _ = col.update_one(filter, update).await;
+        }
 
         let log_msg = format!("👋 Player '{}' joined the game room!", player_name);
         let update_msg = ServerMessage::StateUpdate {
@@ -266,7 +283,9 @@ impl AppState {
         // Update DB
         let filter = mongodb::bson::doc! { "room_code": &room.state.room_code };
         let update = mongodb::bson::doc! { "$set": mongodb::bson::to_document(&room.state).unwrap() };
-        let _ = self.collection.update_one(filter, update).await;
+        if let Some(col) = &self.collection {
+            let _ = col.update_one(filter, update).await;
+        }
 
         let log_msg = "🚀 Game started! Task 1 is active. Go outside, touch grass/tree bark, and submit photo proof!".to_string();
         let update_msg = ServerMessage::StateUpdate {
@@ -397,7 +416,9 @@ impl AppState {
         // Update DB
         let filter = mongodb::bson::doc! { "room_code": &room.state.room_code };
         let update = mongodb::bson::doc! { "$set": mongodb::bson::to_document(&room.state).unwrap() };
-        let _ = self.collection.update_one(filter, update).await;
+        if let Some(col) = &self.collection {
+            let _ = col.update_one(filter, update).await;
+        }
 
         let update_msg = ServerMessage::StateUpdate {
             state: room.state.clone(),
