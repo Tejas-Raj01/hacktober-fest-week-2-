@@ -23,29 +23,44 @@ function App() {
     // Pre-load vision model
     VisionService.initialize();
 
-    const socket = new WebSocket('wss://hacktober-fest-week-2-7n52.onrender.com/ws');
-    
-    socket.onopen = () => setWsReady(true);
-    socket.onclose = () => setWsReady(false);
+    let socket: WebSocket;
+    let reconnectTimeout: any;
 
-    socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'StateUpdate' || data.type === 'GameCreated' || data.type === 'GameJoined') {
-        setGameState(data.payload.state);
-        if (data.payload.player_id) {
-          setPlayerId(data.payload.player_id);
-        }
-      }
+    const connectWs = () => {
+      socket = new WebSocket('wss://hacktober-fest-week-2-7n52.onrender.com/ws');
       
-      if (data.type === 'StateUpdate' && data.payload.state.last_proof?.lore) {
-         setDisplayedLore(data.payload.state.last_proof.lore);
-      }
+      socket.onopen = () => setWsReady(true);
+      
+      socket.onclose = () => {
+        setWsReady(false);
+        // Automatically reconnect after 3 seconds (helps with Render's 50s spin-up time)
+        reconnectTimeout = setTimeout(connectWs, 3000);
+      };
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'StateUpdate' || data.type === 'GameCreated' || data.type === 'GameJoined') {
+          setGameState(data.payload.state);
+          if (data.payload.player_id) {
+            setPlayerId(data.payload.player_id);
+          }
+        }
+        
+        if (data.type === 'StateUpdate' && data.payload.state.last_proof?.lore) {
+           setDisplayedLore(data.payload.state.last_proof.lore);
+        }
+      };
+
+      setWs(socket);
+      wsRef.current = socket;
     };
 
-    setWs(socket);
-    wsRef.current = socket;
+    connectWs();
 
-    return () => socket.close();
+    return () => {
+      clearTimeout(reconnectTimeout);
+      if (socket) socket.close();
+    };
   }, []);
 
   const createGame = () => {
