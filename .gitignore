@@ -14,3 +14,8 @@ try.ts
 # Ignore test files
 try.rs
 try.ts
+
+# Environment variables
+.env
+*.env
+!.env.example

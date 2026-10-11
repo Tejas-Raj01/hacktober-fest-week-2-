@@ -1,184 +1,325 @@
-.counter {
-  font-size: 16px;
-  padding: 5px 10px;
-  border-radius: 5px;
-  color: var(--accent);
-  background: var(--accent-bg);
-  border: 2px solid transparent;
-  transition: border-color 0.3s;
-  margin-bottom: 24px;
+/* ========================================================
+   Outdoor Quest — Mobile & PWA Responsive Styling
+   ======================================================== */
 
-  &:hover {
-    border-color: var(--accent-border);
-  }
-  &:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-}
-
-.hero {
-  position: relative;
-
-  .base,
-  .framework,
-  .vite {
-    inset-inline: 0;
-    margin: 0 auto;
-  }
-
-  .base {
-    width: 170px;
-    position: relative;
-    z-index: 0;
-  }
-
-  .framework,
-  .vite {
-    position: absolute;
-  }
-
-  .framework {
-    z-index: 1;
-    top: 34px;
-    height: 28px;
-    transform: perspective(2000px) rotateZ(300deg) rotateX(44deg) rotateY(39deg)
-      scale(1.4);
-  }
-
-  .vite {
-    z-index: 0;
-    top: 107px;
-    height: 26px;
-    width: auto;
-    transform: perspective(2000px) rotateZ(300deg) rotateX(40deg) rotateY(39deg)
-      scale(0.8);
-  }
-}
-
-#center {
+.app-wrapper {
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 25px;
-  place-content: center;
-  place-items: center;
-  flex-grow: 1;
-
-  @media (max-width: 1024px) {
-    padding: 32px 20px 24px;
-    gap: 18px;
-  }
+  gap: 16px;
 }
 
-#next-steps {
+/* Header & Titles */
+.app-title {
+  color: var(--accent-blue);
+  font-size: clamp(1.8rem, 6vw, 2.6rem);
+  font-weight: 800;
+  margin: 0 0 6px 0;
+  letter-spacing: -0.5px;
+  text-align: center;
+}
+
+.app-subtitle {
+  color: var(--text-sub);
+  font-size: clamp(0.9rem, 2.8vw, 1.05rem);
+  margin: 0 0 16px 0;
+  text-align: center;
+}
+
+/* Cards & Panels */
+.mobile-card {
+  background: var(--bg-mantle);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.mobile-card-title {
+  margin: 0 0 8px 0;
+  font-size: 1.15rem;
+  font-weight: 700;
   display: flex;
-  border-top: 1px solid var(--border);
-  text-align: left;
-
-  & > div {
-    flex: 1 1 0;
-    padding: 32px;
-    @media (max-width: 1024px) {
-      padding: 24px 20px;
-    }
-  }
-
-  .icon {
-    margin-bottom: 16px;
-    width: 22px;
-    height: 22px;
-  }
-
-  @media (max-width: 1024px) {
-    flex-direction: column;
-    text-align: center;
-  }
+  align-items: center;
+  gap: 8px;
 }
 
-#docs {
-  border-right: 1px solid var(--border);
-
-  @media (max-width: 1024px) {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
+.mobile-card-desc {
+  color: var(--text-sub);
+  font-size: 0.88rem;
+  margin: 0 0 14px 0;
+  line-height: 1.4;
 }
 
-#next-steps ul {
-  list-style: none;
-  padding: 0;
+/* Form Controls */
+.mobile-input {
+  width: 100%;
+  padding: 13px 14px;
+  font-size: 16px; /* Prevents auto-zoom on iOS */
+  color: var(--text-main);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.mobile-input::placeholder {
+  color: #6c7086;
+}
+
+/* Buttons */
+.mobile-btn {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  min-height: 48px; /* Touch target minimum */
+  padding: 13px 20px;
+  font-size: 1rem;
+  font-weight: 700;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 0.1s, opacity 0.2s, box-shadow 0.2s;
+}
+
+.mobile-btn-blue {
+  background-color: var(--accent-blue);
+  color: #11111b;
+  box-shadow: 0 4px 14px rgba(137, 180, 250, 0.28);
+}
+
+.mobile-btn-green {
+  background-color: var(--accent-green);
+  color: #11111b;
+  box-shadow: 0 4px 14px rgba(166, 227, 161, 0.28);
+}
+
+.mobile-btn-red {
+  background-color: var(--accent-red);
+  color: #11111b;
+}
+
+.mobile-btn-subtle {
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  min-height: 38px;
+  font-size: 0.86rem;
+}
+
+/* Connection Bar */
+.connection-bar {
+  background: var(--bg-mantle);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.connection-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+}
+
+.server-btn-group {
   display: flex;
   gap: 8px;
-  margin: 32px 0 0;
-
-  .logo {
-    height: 18px;
-  }
-
-  a {
-    color: var(--text-h);
-    font-size: 16px;
-    border-radius: 6px;
-    background: var(--social-bg);
-    display: flex;
-    padding: 6px 12px;
-    align-items: center;
-    gap: 8px;
-    text-decoration: none;
-    transition: box-shadow 0.3s;
-
-    &:hover {
-      box-shadow: var(--shadow);
-    }
-    .button-icon {
-      height: 18px;
-      width: 18px;
-    }
-  }
-
-  @media (max-width: 1024px) {
-    margin-top: 20px;
-    flex-wrap: wrap;
-    justify-content: center;
-
-    li {
-      flex: 1 1 calc(50% - 8px);
-    }
-
-    a {
-      width: 100%;
-      justify-content: center;
-      box-sizing: border-box;
-    }
-  }
+  flex-wrap: wrap;
 }
 
-#spacer {
-  height: 88px;
-  border-top: 1px solid var(--border);
-  @media (max-width: 1024px) {
-    height: 48px;
-  }
+.server-btn-group button {
+  flex: 1 1 auto;
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
 }
 
-.ticks {
-  position: relative;
+/* Active Quest Card */
+.quest-hero-card {
+  background: linear-gradient(145deg, #313244, #1e1e2e);
+  border: 1px solid var(--border-color);
+  border-radius: 18px;
+  padding: 24px 20px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+
+.quest-tag {
+  color: var(--accent-yellow);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.quest-heading {
+  color: var(--text-main);
+  font-size: clamp(1.4rem, 5vw, 2.1rem);
+  font-weight: 800;
+  margin: 0 0 12px 0;
+  line-height: 1.25;
+}
+
+.quest-instruction {
+  color: var(--text-sub);
+  font-size: 1rem;
+  line-height: 1.5;
+  margin: 0 0 18px 0;
+}
+
+.target-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-crust);
+  border: 1px solid var(--border-color);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  color: var(--accent-blue);
+  margin-bottom: 20px;
+}
+
+/* Photo Upload Box */
+.photo-capture-box {
+  border: 2px dashed #585b70;
+  background: var(--bg-crust);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  color: var(--text-main);
+  font-weight: 600;
+  touch-action: manipulation;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.photo-capture-box:active {
+  background-color: var(--bg-surface);
+}
+
+/* Image Preview */
+.photo-preview-wrap {
   width: 100%;
+  max-height: 240px;
+  background: var(--bg-crust);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
 
-  &::before,
-  &::after {
-    content: '';
-    position: absolute;
-    top: -4.5px;
-    border: 5px solid transparent;
+.photo-preview-img {
+  max-height: 240px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+/* Verification Result Box */
+.verify-box {
+  padding: 14px;
+  border-radius: 10px;
+  text-align: left;
+  line-height: 1.4;
+  font-size: 0.92rem;
+}
+
+.verify-box-success {
+  background: rgba(166, 227, 161, 0.15);
+  border: 1px solid var(--accent-green);
+  color: var(--accent-green);
+}
+
+.verify-box-error {
+  background: rgba(243, 139, 168, 0.15);
+  border: 1px solid var(--accent-red);
+  color: var(--accent-red);
+}
+
+/* Room Code Display */
+.room-code-display {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.room-code-pill {
+  font-family: var(--font-mono);
+  font-size: clamp(1.8rem, 6.5vw, 2.5rem);
+  font-weight: 800;
+  background: var(--bg-surface);
+  color: var(--accent-green);
+  padding: 8px 20px;
+  border-radius: 10px;
+  letter-spacing: 2px;
+}
+
+/* Scoreboard */
+.scoreboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scoreboard-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  background: var(--bg-surface);
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+/* ========================================================
+   Mobile-Specific Media Queries (Phones <= 480px)
+   ======================================================== */
+@media (max-width: 480px) {
+  .app-wrapper {
+    padding: 12px;
+    gap: 12px;
   }
 
-  &::before {
-    left: 0;
-    border-left-color: var(--border);
+  .quest-hero-card {
+    padding: 18px 14px;
+    border-radius: 14px;
   }
-  &::after {
-    right: 0;
-    border-right-color: var(--border);
+
+  .mobile-card {
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  .room-code-pill {
+    font-size: 1.7rem;
+    padding: 6px 14px;
+  }
+
+  .photo-preview-wrap {
+    max-height: 200px;
+  }
+
+  .photo-preview-img {
+    max-height: 200px;
   }
 }

@@ -3,6 +3,7 @@ import './App.css';
 import { useOfflineQueue } from './hooks/useOfflineQueue';
 import VisionService from './services/vision';
 import { LoreModal } from './components/LoreModal';
+import { QuestView } from './components/QuestView';
 
 function App() {
   const [ws, setWs] = useState<WebSocket | null>(null);
@@ -10,76 +11,145 @@ function App() {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [playerId, setPlayerId] = useState('');
-  const [proof, setProof] = useState('');
   const [displayedLore, setDisplayedLore] = useState<string | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [visionLabel, setVisionLabel] = useState<string | null>(null);
+
+  const [serverUrl, setServerUrl] = useState<string>(() => {
+    return localStorage.getItem('oq_server_url') || 
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+        ? 'ws://localhost:8080/ws' 
+        : 'wss://hacktober-fest-week-2-7n52.onrender.com/ws');
+  });
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
+  const [lobbyError, setLobbyError] = useState<string | null>(null);
 
   const [wsReady, setWsReady] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const { queueAction } = useOfflineQueue(ws, wsReady);
 
-  useEffect(() => {
-    // Pre-load vision model
-    VisionService.initialize();
+  const connectWs = (targetUrl: string) => {
+    if (wsRef.current) {
+      try {
+        wsRef.current.close();
+      } catch (e) {}
+    }
+    setConnectionStatus('connecting');
+    setWsReady(false);
+    setLobbyError(null);
 
     let socket: WebSocket;
-    let reconnectTimeout: any;
+    try {
+      socket = new WebSocket(targetUrl);
+    } catch (err: any) {
+      setConnectionStatus('error');
+      setLobbyError(`Failed to connect to ${targetUrl}: ${err?.message || err}`);
+      return;
+    }
 
-    const connectWs = () => {
-      socket = new WebSocket('wss://hacktober-fest-week-2-7n52.onrender.com/ws');
-      
-      socket.onopen = () => setWsReady(true);
-      
-      socket.onclose = () => {
-        setWsReady(false);
-        // Automatically reconnect after 3 seconds (helps with Render's 50s spin-up time)
-        reconnectTimeout = setTimeout(connectWs, 3000);
-      };
+    socket.onopen = () => {
+      setWsReady(true);
+      setConnectionStatus('connected');
+      setLobbyError(null);
+    };
 
-      socket.onmessage = (event) => {
+    socket.onclose = () => {
+      setWsReady(false);
+      setConnectionStatus('disconnected');
+    };
+
+    socket.onerror = () => {
+      setWsReady(false);
+      setConnectionStatus('error');
+    };
+
+    socket.onmessage = (event) => {
+      try {
         const data = JSON.parse(event.data);
-        if (data.type === 'StateUpdate' || data.type === 'GameCreated' || data.type === 'GameJoined') {
+        if (data.type === 'GameCreated' || data.type === 'GameJoined' || data.type === 'StateUpdate') {
           setGameState(data.payload.state);
           if (data.payload.player_id) {
             setPlayerId(data.payload.player_id);
           }
         }
-        
-        if (data.type === 'StateUpdate' && data.payload.state.last_proof?.lore) {
-           setDisplayedLore(data.payload.state.last_proof.lore);
-        }
-      };
 
-      setWs(socket);
-      wsRef.current = socket;
+        if (data.type === 'Error') {
+          setLobbyError(`Server Error: ${data.payload.message}`);
+        }
+
+        if (data.type === 'StateUpdate' && data.payload.state?.last_proof?.lore) {
+          setDisplayedLore(data.payload.state.last_proof.lore);
+        }
+      } catch (e) {
+        console.error('Failed to parse WebSocket message', e);
+      }
     };
 
-    connectWs();
+    setWs(socket);
+    wsRef.current = socket;
+  };
+
+  useEffect(() => {
+    VisionService.initialize();
+    connectWs(serverUrl);
 
     return () => {
-      clearTimeout(reconnectTimeout);
-      if (socket) socket.close();
+      if (wsRef.current) {
+        try {
+          wsRef.current.close();
+        } catch (e) {}
+      }
     };
-  }, []);
+  }, [serverUrl]);
+
+
+  const switchServerUrl = (newUrl: string) => {
+    localStorage.setItem('oq_server_url', newUrl);
+    setServerUrl(newUrl);
+  };
 
   const createGame = () => {
-    queueAction('CreateGame', { player_name: playerName });
+    setLobbyError(null);
+    const trimmedName = playerName.trim();
+    if (!trimmedName) {
+      setLobbyError('⚠️ Please enter your Player Name before creating a game.');
+      return;
+    }
+    if (!wsReady || !ws || ws.readyState !== WebSocket.OPEN) {
+      setLobbyError('⏳ Still connecting to server... Please wait a moment or verify your server is running.');
+      connectWs(serverUrl);
+      return;
+    }
+    ws.send(JSON.stringify({ type: 'CreateGame', payload: { player_name: trimmedName } }));
   };
 
   const joinGame = () => {
-    queueAction('JoinGame', { room_code: roomCode, player_name: playerName });
+    setLobbyError(null);
+    const trimmedName = playerName.trim();
+    const trimmedRoom = roomCode.trim().toUpperCase();
+    if (!trimmedName) {
+      setLobbyError('⚠️ Please enter your Player Name before joining a game.');
+      return;
+    }
+    if (!trimmedRoom) {
+      setLobbyError('⚠️ Please enter a Room Code (e.g. QUEST-1234).');
+      return;
+    }
+    if (!wsReady || !ws || ws.readyState !== WebSocket.OPEN) {
+      setLobbyError('⏳ Still connecting to server... Please wait a moment or verify your server is running.');
+      connectWs(serverUrl);
+      return;
+    }
+    ws.send(JSON.stringify({ type: 'JoinGame', payload: { room_code: trimmedRoom, player_name: trimmedName } }));
   };
 
   const startGame = () => {
     queueAction('StartGame', { room_code: gameState.room_code, player_id: playerId });
   };
 
-  const completeTask = () => {
+  const handleCompleteTask = (verifiedProof: string) => {
     queueAction('CompleteTask', {
       room_code: gameState.room_code,
       player_id: playerId,
-      proof: proof,
+      proof: verifiedProof,
       task_index: gameState.current_task_index
     });
     
@@ -95,27 +165,6 @@ function App() {
          status: 'Finished'
        }));
     }
-    
-    setProof('');
-    setVisionLabel(null);
-  };
-
-  const handleProofUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      // Show local image preview
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        setProof(ev.target?.result as string);
-      };
-      reader.readAsDataURL(file);
-
-      // Analyze image offline using MobileNet
-      setIsAnalyzing(true);
-      const label = await VisionService.analyzeImage(file);
-      setVisionLabel(label);
-      setIsAnalyzing(false);
-    }
   };
 
   const leaveGame = () => {
@@ -124,17 +173,233 @@ function App() {
 
   if (!gameState) {
     return (
-      <div className="App" style={{ padding: 20 }}>
-        <h1>🌲 Outdoor Quest (Hybrid AI)</h1>
-        
-        <div style={{ marginTop: 20 }}>
-          <input placeholder="Player Name" value={playerName} onChange={e => setPlayerName(e.target.value)} />
-          <button onClick={createGame} disabled={!wsReady || !playerName}>Create Game</button>
+      <div className="app-wrapper">
+        <h1 className="app-title">🌲 Outdoor Quest</h1>
+        <p className="app-subtitle">Multiplayer Outdoor Quest Game</p>
+
+        {/* Connection status banner */}
+        <div style={{
+          background: '#1e1e2e',
+          padding: '12px 16px',
+          borderRadius: '10px',
+          border: '1px solid #313244',
+          marginBottom: '20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.9em', color: '#a6adc8' }}>Server:</span>
+            <span style={{
+              fontWeight: 'bold',
+              fontSize: '0.9em',
+              color: connectionStatus === 'connected' ? '#a6e3a1' : connectionStatus === 'connecting' ? '#f9e2af' : '#f38ba8'
+            }}>
+              {connectionStatus === 'connected' && '🟢 Connected'}
+              {connectionStatus === 'connecting' && '🟡 Connecting...'}
+              {connectionStatus === 'disconnected' && '🔴 Disconnected'}
+              {connectionStatus === 'error' && '❌ Connection Failed'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '4px' }}>
+            <button
+              onClick={() => switchServerUrl('ws://localhost:8080/ws')}
+              style={{
+                padding: '6px 12px',
+                fontSize: '0.82em',
+                background: serverUrl.includes('localhost') ? '#89b4fa' : '#313244',
+                color: serverUrl.includes('localhost') ? '#11111b' : '#cdd6f4',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              Local (8080)
+            </button>
+            <button
+              onClick={() => switchServerUrl('wss://hacktober-fest-week-2-7n52.onrender.com/ws')}
+              style={{
+                padding: '6px 12px',
+                fontSize: '0.82em',
+                background: serverUrl.includes('onrender.com') ? '#89b4fa' : '#313244',
+                color: serverUrl.includes('onrender.com') ? '#11111b' : '#cdd6f4',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              Cloud (Render)
+            </button>
+            <button
+              onClick={() => connectWs(serverUrl)}
+              style={{
+                padding: '6px 12px',
+                fontSize: '0.82em',
+                background: '#45475a',
+                color: '#cdd6f4',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer'
+              }}
+            >
+              🔄 Retry
+            </button>
+          </div>
+
+          {connectionStatus === 'connecting' && (
+            <p style={{ fontSize: '0.8em', color: '#f9e2af', margin: '4px 0 0' }}>
+              ⏳ Connecting to backend... (If using Render free tier, spin-up may take 30–50s)
+            </p>
+          )}
+          {connectionStatus === 'error' && (
+            <p style={{ fontSize: '0.8em', color: '#f38ba8', margin: '4px 0 0' }}>
+              Make sure your server is running (e.g. <code>cargo run</code> in server folder) or switch to Cloud above.
+            </p>
+          )}
         </div>
-        
-        <div style={{ marginTop: 20 }}>
-          <input placeholder="Room Code" value={roomCode} onChange={e => setRoomCode(e.target.value)} />
-          <button onClick={joinGame} disabled={!wsReady || !playerName || !roomCode}>Join Game</button>
+
+        {/* Error / Alert box */}
+        {lobbyError && (
+          <div style={{
+            background: '#f38ba8',
+            color: '#11111b',
+            padding: '12px',
+            borderRadius: '8px',
+            fontWeight: 'bold',
+            marginBottom: '20px'
+          }}>
+            {lobbyError}
+          </div>
+        )}
+
+        {/* Player Name Input */}
+        <div style={{
+          background: '#1e1e2e',
+          padding: '20px',
+          borderRadius: '12px',
+          border: '1px solid #313244',
+          marginBottom: '20px',
+          textAlign: 'left'
+        }}>
+          <label style={{ display: 'block', color: '#a6adc8', fontSize: '0.9em', marginBottom: '8px', fontWeight: 'bold' }}>
+            Your Name:
+          </label>
+          <input
+            placeholder="Enter your Player Name..."
+            value={playerName}
+            onChange={e => {
+              setPlayerName(e.target.value);
+              if (lobbyError) setLobbyError(null);
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') createGame();
+            }}
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '12px 14px',
+              fontSize: '1em',
+              background: '#313244',
+              border: '1px solid #45475a',
+              borderRadius: '8px',
+              color: '#cdd6f4',
+              outline: 'none'
+            }}
+          />
+        </div>
+
+        {/* Actions Cards */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Create Game Card */}
+          <div style={{
+            background: '#1e1e2e',
+            padding: '20px',
+            borderRadius: '12px',
+            border: '1px solid #313244'
+          }}>
+            <h3 style={{ color: '#89b4fa', margin: '0 0 10px 0' }}>👑 Host a New Game</h3>
+            <p style={{ color: '#a6adc8', fontSize: '0.9em', margin: '0 0 16px 0' }}>
+              Create a room and invite your friends with a code.
+            </p>
+            <button
+              onClick={createGame}
+              style={{
+                width: '100%',
+                padding: '14px',
+                fontSize: '1.05em',
+                background: '#89b4fa',
+                color: '#11111b',
+                fontWeight: 'bold',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                boxShadow: '0 4px 12px rgba(137, 180, 250, 0.3)'
+              }}
+            >
+              🎮 Create Game
+            </button>
+          </div>
+
+          {/* Join Game Card */}
+          <div style={{
+            background: '#1e1e2e',
+            padding: '20px',
+            borderRadius: '12px',
+            border: '1px solid #313244'
+          }}>
+            <h3 style={{ color: '#a6e3a1', margin: '0 0 10px 0' }}>🚀 Join Existing Game</h3>
+            <p style={{ color: '#a6adc8', fontSize: '0.9em', margin: '0 0 16px 0' }}>
+              Enter the room code shared by the host.
+            </p>
+            <input
+              placeholder="Room Code (e.g. QUEST-1234)"
+              value={roomCode}
+              onChange={e => {
+                setRoomCode(e.target.value);
+                if (lobbyError) setLobbyError(null);
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') joinGame();
+              }}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                padding: '12px 14px',
+                fontSize: '1em',
+                background: '#313244',
+                border: '1px solid #45475a',
+                borderRadius: '8px',
+                color: '#cdd6f4',
+                outline: 'none',
+                marginBottom: '12px',
+                textAlign: 'center',
+                letterSpacing: '1px',
+                fontWeight: 'bold'
+              }}
+            />
+            <button
+              onClick={joinGame}
+              style={{
+                width: '100%',
+                padding: '14px',
+                fontSize: '1.05em',
+                background: '#a6e3a1',
+                color: '#11111b',
+                fontWeight: 'bold',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                boxShadow: '0 4px 12px rgba(166, 227, 161, 0.3)'
+              }}
+            >
+              Join Game
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -143,11 +408,12 @@ function App() {
   const isHost = gameState.players?.find((p: any) => p.id === playerId)?.is_host;
 
   return (
-    <div className="App" style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '20px 0' }}>
+    <div className="app-wrapper">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '10px 0' }}>
         <button 
           onClick={leaveGame}
-          style={{ padding: '10px 15px', background: '#f38ba8', color: '#11111b', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+          className="mobile-btn mobile-btn-red"
+          style={{ width: 'auto', minHeight: '38px', padding: '8px 16px', fontSize: '0.9em' }}
         >
           Leave Game
         </button>
@@ -186,67 +452,10 @@ function App() {
       )}
 
       {gameState.status === 'InProgress' && gameState.tasks[gameState.current_task_index] && (
-        <div style={{ 
-          background: 'linear-gradient(145deg, #313244, #1e1e2e)', 
-          padding: '40px', 
-          borderRadius: '16px', 
-          marginTop: '30px',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
-          border: '1px solid #45475a'
-        }}>
-          <div style={{ color: '#f9e2af', fontSize: '0.9em', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '10px', fontWeight: 'bold' }}>
-            Active Quest
-          </div>
-          <h2 style={{ color: '#cdd6f4', margin: '0 0 15px 0', fontSize: '2.2em' }}>
-            {gameState.tasks[gameState.current_task_index].title}
-          </h2>
-          <p style={{ color: '#a6adc8', fontSize: '1.2em', lineHeight: '1.6', marginBottom: '30px' }}>
-            {gameState.tasks[gameState.current_task_index].description}
-          </p>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-            <label style={{
-              padding: '15px',
-              borderRadius: '8px',
-              border: '2px dashed #585b70',
-              background: '#11111b',
-              color: '#cdd6f4',
-              fontSize: '1.1em',
-              textAlign: 'center',
-              cursor: 'pointer'
-            }}>
-              {proof ? "Photo Uploaded!" : "📸 Capture Environment"}
-              <input 
-                type="file" 
-                accept="image/*"
-                capture="environment"
-                onChange={handleProofUpload} 
-                style={{ display: 'none' }}
-              />
-            </label>
-            
-            {isAnalyzing && <p style={{color: '#89b4fa'}}>Analyzing image offline using local AI...</p>}
-            {visionLabel && <p style={{color: '#a6e3a1'}}>Vision Model detected: {visionLabel}</p>}
-
-            <button 
-              onClick={completeTask} 
-              disabled={isAnalyzing || !proof}
-              style={{
-                background: (isAnalyzing || !proof) ? '#585b70' : '#89b4fa',
-                color: '#11111b',
-                padding: '15px',
-                fontSize: '1.1em',
-                fontWeight: 'bold',
-                borderRadius: '8px',
-                border: 'none',
-                cursor: (isAnalyzing || !proof) ? 'not-allowed' : 'pointer',
-                transition: 'background 0.2s'
-              }}
-            >
-              Complete Quest
-            </button>
-          </div>
-        </div>
+        <QuestView
+          task={gameState.tasks[gameState.current_task_index]}
+          onCompleteTask={handleCompleteTask}
+        />
       )}
 
       {gameState.players && gameState.players.length > 0 && (

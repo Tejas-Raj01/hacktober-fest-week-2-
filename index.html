@@ -2,52 +2,87 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Outdoor Quest Web Client</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+    <title>🌲 Outdoor Quest Web Client</title>
+    
+    <!-- PWA & Mobile Meta Tags -->
     <link rel="manifest" href="./manifest.json">
-    <meta name="theme-color" content="#1e1e2e">
+    <link rel="icon" type="image/svg+xml" href="./icon.svg">
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+    <meta name="theme-color" content="#228B22">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Outdoor Quest">
+
     <style>
+        * {
+            box-sizing: border-box;
+        }
         body {
-            font-family: Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: #1e1e2e;
             color: #cdd6f4;
-            padding: 20px;
-            max-width: 800px;
+            padding: 16px;
+            padding-top: calc(16px + env(safe-area-inset-top, 0px));
+            padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+            padding-left: calc(16px + env(safe-area-inset-left, 0px));
+            padding-right: calc(16px + env(safe-area-inset-right, 0px));
+            max-width: 720px;
             margin: 0 auto;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-text-size-adjust: 100%;
         }
         h1, h2, h3 {
             color: #89b4fa;
         }
+        h1 {
+            font-size: clamp(1.6rem, 5vw, 2.2rem);
+            margin-top: 8px;
+            text-align: center;
+        }
         .panel {
             background-color: #313244;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            border: 1px solid #45475a;
         }
         input, button {
-            padding: 8px;
-            margin: 5px 0;
-            border-radius: 4px;
+            font-size: 16px; /* Prevents auto-zoom on mobile */
+            padding: 12px 14px;
+            margin: 4px 0;
+            border-radius: 8px;
             border: 1px solid #45475a;
             background-color: #181825;
             color: #cdd6f4;
+            touch-action: manipulation;
+        }
+        input {
+            width: 100%;
         }
         button {
             background-color: #89b4fa;
             color: #11111b;
             cursor: pointer;
             font-weight: bold;
+            min-height: 44px;
+            transition: transform 0.1s, opacity 0.2s;
+        }
+        button:active {
+            transform: scale(0.97);
         }
         button:hover {
             background-color: #b4befe;
         }
         #log {
             background-color: #11111b;
-            padding: 10px;
-            height: 150px;
+            padding: 12px;
+            height: 140px;
             overflow-y: scroll;
             font-family: monospace;
-            border-radius: 4px;
+            font-size: 0.88rem;
+            border-radius: 8px;
             margin-top: 10px;
         }
         .log-entry {
@@ -60,10 +95,30 @@
         .info { color: #89b4fa; }
         .state {
             background-color: #11111b;
-            padding: 10px;
-            border-radius: 4px;
+            padding: 12px;
+            border-radius: 8px;
             white-space: pre-wrap;
             font-family: monospace;
+            font-size: 0.88rem;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        /* Mobile specific enhancements */
+        @media (max-width: 600px) {
+            body {
+                padding: 12px;
+            }
+            .panel {
+                padding: 14px;
+            }
+            .server-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .server-controls button {
+                width: 100%;
+            }
         }
     </style>
 </head>
@@ -72,18 +127,29 @@
     
     <div class="panel">
         <h2>Connection</h2>
-        <input type="text" id="wsUrl" value="ws://localhost:3001/ws" style="width: 250px;">
-        <button onclick="connect()">Connect</button>
-        <span id="connStatus" style="margin-left: 10px; color: #f38ba8;">Disconnected</span>
+        <div class="server-controls" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <input type="text" id="wsUrl" value="ws://localhost:8080/ws" style="flex: 1 1 200px; min-width: 0;">
+            <button onclick="connect()">Connect</button>
+            <button onclick="setWsUrl('ws://localhost:8080/ws')" style="background-color: #45475a; color: #cdd6f4;">Local (8080)</button>
+            <button onclick="setWsUrl('wss://hacktober-fest-week-2-7n52.onrender.com/ws')" style="background-color: #45475a; color: #cdd6f4;">Cloud (Render)</button>
+            <span id="connStatus" style="color: #f38ba8; font-weight: bold;">Disconnected</span>
+        </div>
+        <p style="font-size: 0.85em; color: #a6adc8; margin-top: 6px;">
+            Make sure your server is running (e.g. <code>cargo run</code> on port 8080 or select Cloud).
+        </p>
     </div>
 
     <div class="panel">
         <h2>Join / Create</h2>
-        <input type="text" id="playerName" placeholder="Player Name">
-        <button onclick="createGame()">Create Game</button>
-        <br>
-        <input type="text" id="roomCode" placeholder="Room Code (e.g. QUEST-1234)">
-        <button onclick="joinGame()">Join Game</button>
+        <div id="actionAlert" style="display: none; padding: 8px 12px; margin-bottom: 10px; border-radius: 4px; background-color: #f38ba8; color: #11111b; font-weight: bold;"></div>
+        <div style="margin-bottom: 10px;">
+            <input type="text" id="playerName" placeholder="Player Name" onkeydown="if(event.key==='Enter') createGame()">
+            <button onclick="createGame()">Create Game</button>
+        </div>
+        <div>
+            <input type="text" id="roomCode" placeholder="Room Code (e.g. QUEST-1234)" onkeydown="if(event.key==='Enter') joinGame()">
+            <button onclick="joinGame()">Join Game</button>
+        </div>
     </div>
 
     <div class="panel">
@@ -110,6 +176,20 @@
         let currentPlayerId = null;
         let currentRoomCode = null;
 
+        function setWsUrl(url) {
+            document.getElementById('wsUrl').value = url;
+            connect();
+        }
+
+        function showAlert(msg) {
+            const alertBox = document.getElementById('actionAlert');
+            if (alertBox) {
+                alertBox.textContent = msg;
+                alertBox.style.display = 'block';
+                setTimeout(() => { alertBox.style.display = 'none'; }, 5000);
+            }
+        }
+
         function log(message, type = 'info') {
             const logDiv = document.getElementById('log');
             const entry = document.createElement('div');
@@ -130,9 +210,20 @@
         function connect() {
             const url = document.getElementById('wsUrl').value;
             if (ws) {
-                ws.close();
+                try { ws.close(); } catch (e) {}
             }
-            ws = new WebSocket(url);
+            log(`Connecting to ${url}...`, 'info');
+            document.getElementById('connStatus').textContent = 'Connecting...';
+            document.getElementById('connStatus').style.color = '#f9e2af';
+
+            try {
+                ws = new WebSocket(url);
+            } catch (err) {
+                document.getElementById('connStatus').textContent = 'Failed to Connect';
+                document.getElementById('connStatus').style.color = '#f38ba8';
+                log(`Failed to open connection: ${err}`, 'error');
+                return;
+            }
             
             ws.onopen = () => {
                 document.getElementById('connStatus').textContent = 'Connected';
@@ -148,7 +239,9 @@
             };
 
             ws.onerror = (err) => {
-                log('WebSocket Error', 'error');
+                document.getElementById('connStatus').textContent = 'Connection Error';
+                document.getElementById('connStatus').style.color = '#f38ba8';
+                log('WebSocket Error - make sure server is running', 'error');
             };
 
             ws.onmessage = (event) => {
@@ -176,6 +269,7 @@
                         
                     case 'Error':
                         log(`Error: ${data.payload.message}`, 'error');
+                        showAlert(`Server Error: ${data.payload.message}`);
                         break;
                         
                     default:
@@ -186,22 +280,51 @@
 
         function sendMsg(type, payload) {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
-                log('Not connected to server', 'error');
-                return;
+                const msg = 'Not connected to server. Please click Connect above.';
+                log(msg, 'error');
+                showAlert(msg);
+                connect();
+                return false;
             }
             ws.send(JSON.stringify({ type, payload }));
+            return true;
         }
 
         function createGame() {
-            const playerName = document.getElementById('playerName').value || 'Guest';
+            const nameInput = document.getElementById('playerName');
+            const playerName = (nameInput.value || '').trim();
+            if (!playerName) {
+                showAlert('⚠️ Please enter a Player Name before creating a game!');
+                nameInput.focus();
+                return;
+            }
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                showAlert('⏳ Connecting to server... Please wait a moment and try again.');
+                connect();
+                return;
+            }
             sendMsg('CreateGame', { player_name: playerName });
         }
 
         function joinGame() {
-            const playerName = document.getElementById('playerName').value || 'Guest';
-            const roomCode = document.getElementById('roomCode').value;
+            const nameInput = document.getElementById('playerName');
+            const playerName = (nameInput.value || '').trim();
+            const roomInput = document.getElementById('roomCode');
+            const roomCode = (roomInput.value || '').trim();
+
+            if (!playerName) {
+                showAlert('⚠️ Please enter a Player Name before joining a game!');
+                nameInput.focus();
+                return;
+            }
             if (!roomCode) {
-                log('Please enter a room code', 'error');
+                showAlert('⚠️ Please enter a Room Code (e.g. QUEST-1234)!');
+                roomInput.focus();
+                return;
+            }
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                showAlert('⏳ Connecting to server... Please wait a moment and try again.');
+                connect();
                 return;
             }
             sendMsg('JoinGame', { room_code: roomCode, player_name: playerName });
@@ -223,8 +346,11 @@
                 log('Join or create a game first', 'error');
                 return;
             }
-            let proof = document.getElementById('proofInput').value;
-            if (!proof) proof = null;
+            let proof = (document.getElementById('proofInput').value || '').trim();
+            if (!proof) {
+                showAlert('⚠️ Please enter photo proof URL or description before completing task!');
+                return;
+            }
             
             sendMsg('CompleteTask', { 
                 room_code: currentRoomCode, 
@@ -233,6 +359,11 @@
             });
             document.getElementById('proofInput').value = '';
         }
+
+        // Auto-connect on load
+        window.addEventListener('load', () => {
+            connect();
+        });
 
         // Register Service Worker for PWA
         if ('serviceWorker' in navigator) {
