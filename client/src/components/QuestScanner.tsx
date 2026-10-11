@@ -230,12 +230,12 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
   };
 
   return (
-    <div className="bg-[#65A369] min-h-screen text-black select-none">
+    <div className="w-full min-h-screen bg-[#65A369] text-black select-none">
       {/* Hidden canvas strictly for anti-cheat hardware snapshot capture (NO FILE INPUT) */}
       <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
 
-      {/* Main Responsive Mobile Frame */}
-      <div className="max-w-md mx-auto h-screen flex flex-col gap-4 p-4 font-sans justify-between">
+      {/* Main Responsive Mobile / Tablet Widescreen Centered Frame */}
+      <div className="max-w-xl mx-auto min-h-screen flex flex-col gap-4 p-4 font-sans justify-between border-r-4 border-l-4 border-black bg-[#A3E681]/30 backdrop-blur-sm shadow-brutal">
         {/* 1. Top Header */}
         <div className="flex justify-between items-start w-full">
           {/* Left: Square settings button */}

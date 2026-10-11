@@ -6,6 +6,8 @@ import { LoreModal } from './components/LoreModal';
 import { QuestScanner } from './components/QuestScanner';
 import { QUESTS } from './data/quests';
 
+export type GameView = 'lobby' | 'scanner';
+
 function App() {
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [gameState, setGameState] = useState<any>(null);
@@ -14,9 +16,12 @@ function App() {
   const [playerId, setPlayerId] = useState('');
   const [displayedLore, setDisplayedLore] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
-  const [appMode, setAppMode] = useState<'scanner' | 'multiplayer'>('scanner');
+
+  // Requirement: View state, starting strictly on the Lobby view by default
+  const [currentView, setCurrentView] = useState<GameView>('lobby');
+
   const [questIndex, setQuestIndex] = useState(0);
-  const [userScore, setUserScore] = useState(0);
+  const [, setUserScore] = useState(0);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   const [serverUrl, setServerUrl] = useState<string>(() => {
@@ -85,8 +90,9 @@ function App() {
             break;
           case 'StateUpdate':
             setGameState(data.payload.state);
+            // Switch to scanner automatically when game transitions to InProgress
             if (data.payload.state.status === 'InProgress') {
-              setAppMode('scanner');
+              setCurrentView('scanner');
             }
             break;
           case 'LoreEvent':
@@ -161,10 +167,13 @@ function App() {
   };
 
   const startGame = () => {
+    if (!gameState?.room_code || !playerId) return;
     queueAction('StartGame', { room_code: gameState.room_code, player_id: playerId });
+    setCurrentView('scanner');
   };
 
   const handleCompleteTask = (verifiedProof: string) => {
+    if (!gameState) return;
     queueAction('CompleteTask', {
       room_code: gameState.room_code,
       player_id: playerId,
@@ -172,7 +181,6 @@ function App() {
       task_index: gameState.current_task_index,
     });
 
-    // Optimistic UI update
     if (gameState.current_task_index + 1 < gameState.tasks.length) {
       setGameState((prev: any) => ({
         ...prev,
@@ -197,36 +205,38 @@ function App() {
     window.location.reload();
   };
 
-  // ================= RUGGED NEO-BRUTALISM QUEST SCANNER VIEW =================
-  if (appMode === 'scanner') {
-    const activeQuest =
-      gameState?.status === 'InProgress' && gameState.tasks?.[gameState.current_task_index || 0]
-        ? {
-            targetKeyword: gameState.tasks[gameState.current_task_index || 0].title?.toLowerCase().trim(),
-            points: gameState.tasks[gameState.current_task_index || 0].points || 10,
-          }
-        : {
-            targetKeyword: QUESTS[questIndex % QUESTS.length].targetKeyword,
-            points: QUESTS[questIndex % QUESTS.length].points || 10,
-          };
+  // ================= 1. ACTIVE CAMERA SCANNER VIEW =================
+  if (currentView === 'scanner') {
+    const isMultiplayerActive =
+      gameState?.status === 'InProgress' && gameState.tasks?.[gameState.current_task_index || 0];
+
+    const activeQuest = isMultiplayerActive
+      ? {
+          targetKeyword: gameState.tasks[gameState.current_task_index || 0].title?.toLowerCase().trim(),
+          points: gameState.tasks[gameState.current_task_index || 0].points || 10,
+        }
+      : {
+          targetKeyword: QUESTS[questIndex % QUESTS.length].targetKeyword,
+          points: QUESTS[questIndex % QUESTS.length].points || 10,
+        };
 
     return (
-      <div className="relative w-full h-full min-h-screen">
+      <div className="min-h-screen w-full bg-[#65A369] text-black font-sans flex flex-col select-none">
         <QuestScanner
           targetKeyword={activeQuest.targetKeyword}
           points={activeQuest.points}
           onSuccess={(proofUrl) => {
             setUserScore((s) => s + activeQuest.points);
-            if (gameState && gameState.status === 'InProgress') {
+            if (isMultiplayerActive) {
               handleCompleteTask(proofUrl);
             }
           }}
           onBack={() => {
-            if (gameState && gameState.status === 'InProgress') return;
+            if (isMultiplayerActive) return;
             setQuestIndex((idx) => (idx > 0 ? idx - 1 : QUESTS.length - 1));
           }}
           onNext={() => {
-            if (gameState && gameState.status === 'InProgress') return;
+            if (isMultiplayerActive) return;
             setQuestIndex((idx) => (idx + 1) % QUESTS.length);
           }}
           onSettings={() => {
@@ -234,12 +244,12 @@ function App() {
           }}
         />
 
-        {/* Settings Modal */}
+        {/* In-Game Settings Modal */}
         {showSettingsModal && (
           <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-            <div className="bg-[#65A369] border-4 border-black p-6 rounded-xl shadow-[6px_6px_0px_rgba(0,0,0,1)] max-w-sm w-full flex flex-col gap-4 font-sans text-black">
+            <div className="bg-[#65A369] border-4 border-black p-6 rounded-2xl shadow-[6px_6px_0px_rgba(0,0,0,1)] max-w-sm w-full flex flex-col gap-4 font-sans text-black">
               <div className="flex justify-between items-center border-b-4 border-black pb-2">
-                <h3 className="text-xl font-black uppercase">Settings & Mode</h3>
+                <h3 className="text-xl font-black uppercase">Settings &amp; Menu</h3>
                 <button
                   type="button"
                   onClick={() => setShowSettingsModal(false)}
@@ -249,16 +259,13 @@ function App() {
                 </button>
               </div>
 
-              <div className="bg-white border-4 border-black p-3 shadow-brutal flex flex-col gap-1">
-                <span className="text-xs uppercase font-bold text-gray-500">Active Target</span>
+              <div className="bg-white border-4 border-black p-3 shadow-brutal flex flex-col gap-1 rounded-xl">
+                <span className="text-xs uppercase font-black text-gray-500">Active Quest Target</span>
                 <span className="text-lg font-black uppercase text-green-700">
                   {QUESTS[questIndex % QUESTS.length].title} ({activeQuest.targetKeyword})
                 </span>
-                <span className="text-xs text-gray-600 font-bold">
+                <span className="text-xs text-gray-700 font-bold">
                   {QUESTS[questIndex % QUESTS.length].description}
-                </span>
-                <span className="text-xs font-black text-black mt-1">
-                  Total Points Claimed: {userScore}
                 </span>
               </div>
 
@@ -266,17 +273,17 @@ function App() {
                 type="button"
                 onClick={() => {
                   setShowSettingsModal(false);
-                  setAppMode('multiplayer');
+                  setCurrentView('lobby');
                 }}
-                className="w-full bg-[#A3E681] border-4 border-black font-black uppercase py-3 shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none cursor-pointer"
+                className="w-full bg-[#A3E681] border-4 border-black font-black uppercase py-3 rounded-xl shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none cursor-pointer"
               >
-                🎮 Multiplayer Room Lobby
+                🏕️ Return to Game Lobby
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowSettingsModal(false)}
-                className="w-full bg-gray-200 border-4 border-black font-black uppercase py-3 shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none cursor-pointer"
+                className="w-full bg-gray-200 border-4 border-black font-black uppercase py-3 rounded-xl shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none cursor-pointer"
               >
                 Resume Camera Scan
               </button>
@@ -287,80 +294,216 @@ function App() {
     );
   }
 
-  // ================= LOBBY VIEW (WHEN NO GAME IS ACTIVE) =================
-  if (!gameState) {
+  // ================= 2. MULTIPLAYER ROOM IN LOBBY / FINISHED =================
+  if (gameState) {
+    const isHost = gameState.players?.find((p: any) => p.id === playerId)?.is_host;
+    const sortedPlayers = [...(gameState.players || [])].sort((a: any, b: any) => (b.score || 0) - (a.score || 0));
+
     return (
-      <div className="app-wrapper">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', background: 'rgba(101, 163, 105, 0.2)', border: '2px solid #65A369', padding: '12px 16px', borderRadius: '12px' }}>
-          <span style={{ fontWeight: 'bold', fontSize: '0.92rem', color: '#A3E681' }}>📸 Solo / Offline Active Quest Scanner</span>
+      <div className="min-h-screen w-full bg-[#65A369] text-black font-sans flex flex-col">
+        <div className="max-w-xl mx-auto flex flex-col p-4 shadow-brutal border-r-4 border-l-4 border-black min-h-screen bg-[#A3E681]/30 backdrop-blur-sm w-full gap-4">
+          {/* Top Bar */}
+          <div className="flex justify-between items-center w-full">
+            <button
+              onClick={leaveGame}
+              className="bg-red-400 text-black font-black border-4 border-black px-4 py-2 rounded-lg shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none uppercase text-sm cursor-pointer"
+            >
+              🚪 Leave Room
+            </button>
+
+            <span className="bg-[#A3E681] border-4 border-black font-black rounded-full px-4 py-1.5 shadow-brutal text-sm uppercase">
+              {gameState.status === 'Lobby' && '⏳ Waiting Lobby'}
+              {gameState.status === 'Finished' && '🏆 Game Finished'}
+            </span>
+          </div>
+
+          {/* Room Code Card */}
+          <div className="bg-white border-4 border-black p-4 rounded-2xl shadow-brutal flex justify-between items-center">
+            <div>
+              <span className="text-xs uppercase font-black text-gray-500 block">Room Code</span>
+              <span className="text-2xl font-black uppercase tracking-widest text-black">
+                {gameState.room_code}
+              </span>
+            </div>
+            <button
+              onClick={copyRoomCode}
+              className="bg-yellow-400 text-black font-black border-4 border-black px-4 py-2 rounded-xl shadow-brutal text-sm uppercase active:translate-x-0.5 active:translate-y-0.5 active:shadow-none cursor-pointer"
+            >
+              {copiedCode ? '✅ Copied!' : '📋 Copy'}
+            </button>
+          </div>
+
+          {/* Lobby Waiting Card */}
+          {gameState.status === 'Lobby' && (
+            <div className="bg-white border-4 border-black p-6 rounded-2xl shadow-brutal text-center flex flex-col items-center gap-4">
+              <span className="text-5xl">🏕️</span>
+              <h2 className="text-2xl font-black uppercase tracking-wider text-black">
+                Expedition Basecamp
+              </h2>
+              <p className="text-gray-700 font-bold text-sm">
+                Waiting for players to assemble before launching the scavenger hunt.
+              </p>
+
+              {isHost ? (
+                <button
+                  onClick={startGame}
+                  className="w-full max-w-xs bg-[#60A5FA] text-white font-black border-4 border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_rgba(0,0,0,1)] p-4 rounded-xl text-lg uppercase transition-all cursor-pointer"
+                >
+                  🚀 Start Game (Host)
+                </button>
+              ) : (
+                <div className="bg-gray-200 border-2 border-black rounded-lg p-3 font-bold text-xs uppercase text-gray-700">
+                  ⏳ Waiting for the room host to start...
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Finished Card */}
+          {gameState.status === 'Finished' && (
+            <div className="bg-white border-4 border-black p-6 rounded-2xl shadow-brutal text-center flex flex-col items-center gap-4">
+              <span className="text-5xl">🏆</span>
+              <h2 className="text-2xl font-black uppercase tracking-wider text-black">
+                Expedition Completed!
+              </h2>
+              <p className="text-gray-700 font-bold text-sm">
+                All nature quests have been completed. Check out the final leaderboard!
+              </p>
+              <button
+                onClick={leaveGame}
+                className="w-full max-w-xs bg-[#86EFAC] text-black font-black border-4 border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_rgba(0,0,0,1)] p-4 rounded-xl text-lg uppercase transition-all cursor-pointer"
+              >
+                🌲 Return to Basecamp
+              </button>
+            </div>
+          )}
+
+          {/* Leaderboard Players List */}
+          <div className="bg-white border-4 border-black p-5 rounded-2xl shadow-brutal flex flex-col gap-3">
+            <h3 className="font-black text-lg uppercase tracking-wider text-black flex items-center gap-2">
+              <span>🏅</span> Adventurers ({sortedPlayers.length})
+            </h3>
+            <div className="flex flex-col gap-2">
+              {sortedPlayers.map((p: any, idx: number) => {
+                const isCurrent = p.id === playerId;
+                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
+                return (
+                  <div
+                    key={p.id}
+                    className={`flex justify-between items-center p-3 border-2 border-black rounded-xl ${
+                      isCurrent ? 'bg-[#A3E681]/40 font-black' : 'bg-gray-100 font-bold'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span>{medal}</span>
+                      <span>
+                        {p.name} {p.is_host && '👑'} {isCurrent && '(You)'}
+                      </span>
+                    </div>
+                    <span className="font-black text-green-800">{p.score || 0} pts</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= 3. MAIN GAME LOBBY VIEW (DEFAULT) =================
+  return (
+    <div className="min-h-screen w-full bg-[#65A369] text-black font-sans flex flex-col select-none">
+      {/* Centered Mobile/Tablet Widescreen Frame with Edge-to-Edge Green Sides */}
+      <div className="max-w-xl mx-auto flex flex-col p-4 shadow-brutal border-r-4 border-l-4 border-black min-h-screen bg-[#A3E681]/30 backdrop-blur-sm w-full">
+        {/* Top Bar: Solo Active Scanner CTA */}
+        <div className="bg-[#A3E681] border-4 border-black p-4 rounded-xl shadow-brutal flex justify-between items-center mb-6">
+          <div>
+            <span className="font-black text-sm uppercase tracking-wide block text-black">
+              📸 Solo Active Scanner
+            </span>
+            <span className="text-xs font-bold text-gray-800">
+              Practice &amp; test edge AI without room code
+            </span>
+          </div>
           <button
-            onClick={() => setAppMode('scanner')}
-            className="mobile-btn mobile-btn-green"
-            style={{ width: 'auto', minHeight: '34px', padding: '4px 16px', fontSize: '0.85rem' }}
+            type="button"
+            onClick={() => setCurrentView('scanner')}
+            className="bg-[#FBBF24] border-4 border-black font-black text-lg px-4 py-2 rounded-lg shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_rgba(0,0,0,1)] transition-all cursor-pointer text-black"
           >
             Open Scanner
           </button>
         </div>
 
-        <header className="app-header">
-          <h1 className="app-title">🌲 Outdoor Quest</h1>
-          <p className="app-subtitle">Multiplayer AI Nature Scavenger Hunt • Offline-Ready PWA</p>
+        {/* Header with Cartoon Game Shadow */}
+        <header className="text-center mb-6">
+          <h1 className="text-4xl md:text-5xl font-black text-white uppercase tracking-wider [text-shadow:_4px_4px_0px_#000] drop-shadow-lg mb-2">
+            🌲 Outdoor Quest
+          </h1>
+          <p className="text-black font-bold text-sm md:text-base tracking-wide">
+            Multiplayer AI Nature Scavenger Hunt • Offline-Ready PWA
+          </p>
         </header>
 
-        {/* Server Connection Banner */}
-        <div className="connection-bar">
-          <div className="connection-bar-header">
-            <span style={{ color: 'var(--text-sub)' }}>Server Backend:</span>
-            <span
-              style={{
-                fontWeight: 'bold',
-                color:
-                  connectionStatus === 'connected'
-                    ? 'var(--accent-green)'
-                    : connectionStatus === 'connecting'
-                    ? 'var(--accent-yellow)'
-                    : 'var(--accent-red)',
-              }}
-            >
-              {connectionStatus === 'connected' && '🟢 Connected'}
-              {connectionStatus === 'connecting' && '🟡 Connecting...'}
-              {connectionStatus === 'disconnected' && '🔴 Disconnected'}
-              {connectionStatus === 'error' && '❌ Connection Failed'}
+        {/* Server Backend Connection Bar */}
+        <div className="bg-white border-4 border-black p-4 rounded-2xl shadow-brutal flex flex-col gap-3 mb-6">
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <span className="font-black text-sm uppercase tracking-wide text-black">
+              Server Backend:
             </span>
+            <div className="flex items-center gap-2">
+              <span
+                className={`w-3.5 h-3.5 rounded-full border-2 border-black ${
+                  connectionStatus === 'connected'
+                    ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]'
+                    : connectionStatus === 'connecting'
+                    ? 'bg-yellow-400 animate-ping'
+                    : 'bg-red-500'
+                }`}
+              />
+              <span className="font-black text-xs uppercase tracking-wider text-black">
+                {connectionStatus === 'connected' && '🟢 Connected'}
+                {connectionStatus === 'connecting' && '🟡 Connecting...'}
+                {connectionStatus === 'disconnected' && '🔴 Disconnected'}
+                {connectionStatus === 'error' && '❌ Connection Failed'}
+              </span>
+            </div>
           </div>
 
-          <div className="server-btn-group">
+          <div className="flex gap-2 flex-wrap">
             <button
+              type="button"
               onClick={() => switchServerUrl('ws://localhost:8080/ws')}
-              style={{
-                background: serverUrl.includes('localhost') ? 'var(--accent-blue)' : 'var(--bg-surface)',
-                color: serverUrl.includes('localhost') ? '#11111b' : 'var(--text-main)',
-              }}
+              className={`px-3 py-2 rounded-lg text-sm transition-all cursor-pointer ${
+                serverUrl.includes('localhost')
+                  ? 'bg-[#60A5FA] border-4 border-black font-black text-white shadow-brutal'
+                  : 'bg-gray-300 border-4 border-black rounded-lg text-black font-bold shadow-brutal hover:bg-gray-200'
+              }`}
             >
               Local (8080)
             </button>
             <button
+              type="button"
               onClick={() => switchServerUrl('wss://hacktober-fest-week-2-7n52.onrender.com/ws')}
-              style={{
-                background: serverUrl.includes('onrender.com') ? 'var(--accent-blue)' : 'var(--bg-surface)',
-                color: serverUrl.includes('onrender.com') ? '#11111b' : 'var(--text-main)',
-              }}
+              className={`px-3 py-2 rounded-lg text-sm transition-all cursor-pointer ${
+                serverUrl.includes('onrender.com')
+                  ? 'bg-[#60A5FA] border-4 border-black font-black text-white shadow-brutal'
+                  : 'bg-gray-300 border-4 border-black rounded-lg text-black font-bold shadow-brutal hover:bg-gray-200'
+              }`}
             >
               Cloud (Render)
             </button>
             <button
+              type="button"
               onClick={() => connectWs(serverUrl)}
-              style={{
-                background: 'var(--bg-surface)',
-                color: 'var(--text-main)',
-              }}
+              className="px-3 py-2 rounded-lg text-sm bg-gray-300 border-4 border-black rounded-lg text-black font-bold shadow-brutal hover:bg-gray-200 transition-all cursor-pointer"
             >
               🔄 Reconnect
             </button>
           </div>
 
           {connectionStatus === 'connecting' && (
-            <p style={{ fontSize: '0.8rem', color: 'var(--accent-yellow)', margin: '2px 0 0' }}>
+            <p className="text-xs font-bold text-amber-800">
               ⏳ Connecting to server... (Render cloud spin-up takes ~30s on cold start)
             </p>
           )}
@@ -368,27 +511,18 @@ function App() {
 
         {/* Lobby Error Alert */}
         {lobbyError && (
-          <div
-            style={{
-              background: 'rgba(243, 139, 168, 0.15)',
-              border: '1px solid var(--accent-red)',
-              color: 'var(--accent-red)',
-              padding: '14px',
-              borderRadius: '10px',
-              fontWeight: 'bold',
-            }}
-          >
+          <div className="bg-red-200 border-4 border-red-800 text-red-950 p-4 rounded-xl font-black text-sm mb-6 shadow-brutal">
             {lobbyError}
           </div>
         )}
 
         {/* Player Name Input Card */}
-        <div className="mobile-card">
-          <label style={{ display: 'block', color: 'var(--text-sub)', fontSize: '0.92rem', marginBottom: '8px', fontWeight: 'bold' }}>
-            👤 Player Name:
+        <div className="mb-6">
+          <label className="block text-black font-black text-sm uppercase tracking-wider mb-2">
+            👤 Adventurer Name:
           </label>
           <input
-            className="mobile-input"
+            className="border-4 border-black rounded-xl bg-white p-4 font-bold text-lg focus:outline-none focus:ring-4 focus:ring-yellow-400 placeholder-gray-500 shadow-brutal text-black w-full"
             placeholder="Enter your adventurer name..."
             value={playerName}
             onChange={(e) => {
@@ -401,243 +535,65 @@ function App() {
           />
         </div>
 
-        {/* Responsive Lobby Cards (Side-by-side on Laptop, Stacked on Mobile) */}
-        <div className="lobby-grid">
-          {/* Create Room Card */}
-          <div className="mobile-card">
-            <h3 className="mobile-card-title">
-              <span>👑</span> Host a New Game
-            </h3>
-            <p className="mobile-card-desc">
-              Generate a unique room code, gather fellow players, and launch an outdoor expedition.
-            </p>
-            <button onClick={createGame} className="mobile-btn mobile-btn-blue">
+        {/* Game Mode Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {/* Host Card */}
+          <div className="bg-white border-4 border-black p-6 rounded-2xl shadow-brutal flex flex-col justify-between">
+            <div>
+              <h3 className="text-2xl font-black uppercase text-black flex items-center gap-2 mb-2">
+                <span>👑</span> Host a New Game
+              </h3>
+              <p className="text-gray-700 font-bold text-sm mb-4 leading-snug">
+                Generate a unique room code, gather fellow players, and launch an outdoor expedition.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={createGame}
+              className="bg-[#60A5FA] text-white font-black border-4 border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_rgba(0,0,0,1)] p-4 rounded-xl text-lg uppercase transition-all cursor-pointer w-full text-center"
+            >
               🎮 Create Game Room
             </button>
           </div>
 
-          {/* Join Room Card */}
-          <div className="mobile-card">
-            <h3 className="mobile-card-title">
-              <span>🚀</span> Join Existing Room
-            </h3>
-            <p className="mobile-card-desc">
-              Have a room code from the host? Enter it below to jump directly into the lobby.
-            </p>
-            <input
-              className="mobile-input"
-              placeholder="Room Code (e.g. QUEST-1234)"
-              value={roomCode}
-              onChange={(e) => {
-                setRoomCode(e.target.value);
-                if (lobbyError) setLobbyError(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') joinGame();
-              }}
-              style={{ textAlign: 'center', letterSpacing: '2px', fontWeight: 'bold' }}
-            />
-            <button onClick={joinGame} className="mobile-btn mobile-btn-green">
-              ⚡ Join Room
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ================= IN-GAME VIEW (LOBBY / IN-PROGRESS / FINISHED) =================
-  const isHost = gameState.players?.find((p: any) => p.id === playerId)?.is_host;
-  const sortedPlayers = [...(gameState.players || [])].sort((a: any, b: any) => (b.score || 0) - (a.score || 0));
-  const currentTaskIndex = gameState.current_task_index || 0;
-  const totalTasks = gameState.tasks?.length || 1;
-  const progressPercent = Math.min(100, Math.round(((currentTaskIndex) / totalTasks) * 100));
-
-  return (
-    <div className="app-wrapper">
-      {/* Top Navigation Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-        <button
-          onClick={leaveGame}
-          className="mobile-btn mobile-btn-red"
-          style={{ width: 'auto', minHeight: '38px', padding: '6px 16px', fontSize: '0.88rem' }}
-        >
-          🚪 Leave
-        </button>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span
-            style={{
-              padding: '6px 12px',
-              borderRadius: '20px',
-              fontSize: '0.82rem',
-              fontWeight: 'bold',
-              background:
-                gameState.status === 'InProgress'
-                  ? 'rgba(34, 197, 94, 0.2)'
-                  : gameState.status === 'Lobby'
-                  ? 'rgba(137, 180, 250, 0.2)'
-                  : 'rgba(249, 226, 175, 0.2)',
-              color:
-                gameState.status === 'InProgress'
-                  ? 'var(--accent-green)'
-                  : gameState.status === 'Lobby'
-                  ? 'var(--accent-blue)'
-                  : 'var(--accent-yellow)',
-              border: '1px solid currentColor',
-            }}
-          >
-            {gameState.status === 'Lobby' && '⏳ Waiting Lobby'}
-            {gameState.status === 'InProgress' && '🌲 Quest Active'}
-            {gameState.status === 'Finished' && '🏆 Game Finished'}
-          </span>
-        </div>
-      </div>
-
-      {/* Main Responsive Grid (2 Columns on Laptop / 1 Column on Phone) */}
-      <div className="game-grid">
-        {/* LEFT COLUMN: ACTIVE QUEST / LOBBY / FINISH CARD */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* LOBBY STATE */}
-          {gameState.status === 'Lobby' && (
-            <div className="mobile-card" style={{ textAlign: 'center', padding: '36px 20px' }}>
-              <div style={{ fontSize: '3rem', marginBottom: '12px' }}>🏕️</div>
-              <h2 style={{ color: 'var(--text-main)', margin: '0 0 10px 0' }}>Expedition Basecamp</h2>
-              <p style={{ color: 'var(--text-sub)', fontSize: '1rem', margin: '0 0 24px 0' }}>
-                Waiting for participants to join the lobby before launching the hunt.
+          {/* Join Card */}
+          <div className="bg-white border-4 border-black p-6 rounded-2xl shadow-brutal flex flex-col justify-between">
+            <div>
+              <h3 className="text-2xl font-black uppercase text-black flex items-center gap-2 mb-2">
+                <span>🚀</span> Join Existing Room
+              </h3>
+              <p className="text-gray-700 font-bold text-sm mb-4 leading-snug">
+                Have a room code from the host? Enter it below to jump directly into the lobby.
               </p>
-
-              {isHost ? (
-                <button
-                  onClick={startGame}
-                  className="mobile-btn mobile-btn-blue"
-                  style={{ maxWidth: '280px', margin: '0 auto', fontSize: '1.1rem' }}
-                >
-                  🚀 Start Game (Host)
-                </button>
-              ) : (
-                <div
-                  style={{
-                    padding: '12px 20px',
-                    background: 'var(--bg-surface)',
-                    borderRadius: '10px',
-                    color: 'var(--text-sub)',
-                    display: 'inline-block',
-                  }}
-                >
-                  ⏳ Waiting for the room host to start the game...
-                </div>
-              )}
             </div>
-          )}
-
-          {/* IN-PROGRESS QUEST */}
-          {gameState.status === 'InProgress' && gameState.tasks?.[currentTaskIndex] && (
-            <>
-              {/* Quest Progress Tracker */}
-              <div
-                style={{
-                  background: 'var(--bg-mantle)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '12px',
-                  padding: '12px 16px',
+            <div className="flex flex-col gap-2 mt-auto">
+              <input
+                className="border-4 border-black rounded-xl bg-white p-4 font-black text-lg text-center tracking-widest focus:outline-none focus:ring-4 focus:ring-yellow-400 placeholder-gray-500 shadow-brutal text-black w-full"
+                placeholder="ROOM CODE (QUEST-1234)"
+                value={roomCode}
+                onChange={(e) => {
+                  setRoomCode(e.target.value.toUpperCase());
+                  if (lobbyError) setLobbyError(null);
                 }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.86rem', marginBottom: '8px' }}>
-                  <span style={{ color: 'var(--text-sub)' }}>
-                    Quest <strong>{currentTaskIndex + 1}</strong> of <strong>{totalTasks}</strong>
-                  </span>
-                  <span style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>{progressPercent}% Complete</span>
-                </div>
-                <div style={{ width: '100%', height: '8px', background: 'var(--bg-surface)', borderRadius: '4px', overflow: 'hidden' }}>
-                  <div
-                    style={{
-                      width: `${progressPercent}%`,
-                      height: '100%',
-                      background: 'linear-gradient(90deg, #38bdf8, #22c55e)',
-                      transition: 'width 0.3s ease',
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* State-Gated Quest View with Live Camera Viewfinder */}
-              <QuestScanner
-                targetKeyword={gameState.tasks[currentTaskIndex]?.title?.toLowerCase().trim() || 'bench'}
-                points={gameState.tasks[currentTaskIndex]?.points || 10}
-                onSuccess={handleCompleteTask}
-                onSettings={() => setShowSettingsModal(true)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') joinGame();
+                }}
               />
-            </>
-          )}
-
-          {/* FINISHED STATE */}
-          {gameState.status === 'Finished' && (
-            <div className="mobile-card" style={{ textAlign: 'center', padding: '36px 20px' }}>
-              <div style={{ fontSize: '3.5rem', marginBottom: '12px' }}>🏆</div>
-              <h2 style={{ color: 'var(--accent-yellow)', margin: '0 0 10px 0' }}>Expedition Completed!</h2>
-              <p style={{ color: 'var(--text-sub)', fontSize: '1rem', margin: '0 0 24px 0' }}>
-                All nature quests have been completed. Check out the final leaderboard scores!
-              </p>
               <button
-                onClick={leaveGame}
-                className="mobile-btn mobile-btn-green"
-                style={{ maxWidth: '280px', margin: '0 auto' }}
+                type="button"
+                onClick={joinGame}
+                className="bg-[#86EFAC] text-black font-black border-4 border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_rgba(0,0,0,1)] p-4 rounded-xl text-lg uppercase transition-all cursor-pointer w-full text-center"
               >
-                🌲 Return to Basecamp
+                ⚡ Join Room
               </button>
             </div>
-          )}
-        </div>
-
-        {/* RIGHT COLUMN: ROOM CODE & LEADERBOARD SCOREBOARD */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Room Code Card with One-Click Copy */}
-          <div className="room-code-display">
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-sub)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-              Room Code
-            </span>
-            <span className="room-code-pill">{gameState.room_code}</span>
-            <button
-              onClick={copyRoomCode}
-              className="mobile-btn mobile-btn-subtle"
-              style={{ minHeight: '36px', fontSize: '0.85rem', width: 'auto', padding: '6px 18px' }}
-            >
-              {copiedCode ? '✅ Copied!' : '📋 Copy Code'}
-            </button>
-          </div>
-
-          {/* Scoreboard Card */}
-          <div className="scoreboard-card">
-            <h3 style={{ margin: '0 0 14px 0', color: 'var(--text-main)', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>🏅</span> Leaderboard
-            </h3>
-
-            <div className="scoreboard-list">
-              {sortedPlayers.map((p: any, idx: number) => {
-                const isCurrentPlayer = p.id === playerId;
-                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
-
-                return (
-                  <div
-                    key={p.id}
-                    className={`scoreboard-row ${isCurrentPlayer ? 'is-current' : ''}`}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span className="rank-badge">{medal}</span>
-                      <span style={{ fontWeight: isCurrentPlayer ? 'bold' : 'normal', color: 'var(--text-main)' }}>
-                        {p.name} {p.is_host && '👑'} {isCurrentPlayer && <small style={{ color: 'var(--accent-green)' }}>(You)</small>}
-                      </span>
-                    </div>
-                    <span style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>
-                      {p.score || 0} pts
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         </div>
+
+        {/* Footer Note */}
+        <footer className="mt-auto text-center py-4 border-t-2 border-black/20 text-xs font-black uppercase tracking-wider text-black/70">
+          Touch Grass Edition • Offline Transformers.js Vision
+        </footer>
       </div>
 
       {/* Lore Modal Component */}
