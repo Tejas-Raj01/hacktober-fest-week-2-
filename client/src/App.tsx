@@ -3,7 +3,8 @@ import './App.css';
 import { useOfflineQueue } from './hooks/useOfflineQueue';
 import VisionService from './services/vision';
 import { LoreModal } from './components/LoreModal';
-import { QuestView } from './components/QuestView';
+import { QuestScanner } from './components/QuestScanner';
+import { QUESTS } from './data/quests';
 
 function App() {
   const [ws, setWs] = useState<WebSocket | null>(null);
@@ -13,6 +14,10 @@ function App() {
   const [playerId, setPlayerId] = useState('');
   const [displayedLore, setDisplayedLore] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [appMode, setAppMode] = useState<'scanner' | 'multiplayer'>('scanner');
+  const [questIndex, setQuestIndex] = useState(0);
+  const [userScore, setUserScore] = useState(0);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   const [serverUrl, setServerUrl] = useState<string>(() => {
     return (
@@ -80,6 +85,9 @@ function App() {
             break;
           case 'StateUpdate':
             setGameState(data.payload.state);
+            if (data.payload.state.status === 'InProgress') {
+              setAppMode('scanner');
+            }
             break;
           case 'LoreEvent':
             setDisplayedLore(data.payload.lore);
@@ -189,10 +197,111 @@ function App() {
     window.location.reload();
   };
 
+  // ================= RUGGED NEO-BRUTALISM QUEST SCANNER VIEW =================
+  if (appMode === 'scanner') {
+    const activeQuest =
+      gameState?.status === 'InProgress' && gameState.tasks?.[gameState.current_task_index || 0]
+        ? {
+            targetKeyword: gameState.tasks[gameState.current_task_index || 0].title?.toLowerCase().trim(),
+            points: gameState.tasks[gameState.current_task_index || 0].points || 10,
+          }
+        : {
+            targetKeyword: QUESTS[questIndex % QUESTS.length].targetKeyword,
+            points: QUESTS[questIndex % QUESTS.length].points || 10,
+          };
+
+    return (
+      <div className="relative w-full h-full min-h-screen">
+        <QuestScanner
+          targetKeyword={activeQuest.targetKeyword}
+          points={activeQuest.points}
+          onSuccess={(proofUrl) => {
+            setUserScore((s) => s + activeQuest.points);
+            if (gameState && gameState.status === 'InProgress') {
+              handleCompleteTask(proofUrl);
+            }
+          }}
+          onBack={() => {
+            if (gameState && gameState.status === 'InProgress') return;
+            setQuestIndex((idx) => (idx > 0 ? idx - 1 : QUESTS.length - 1));
+          }}
+          onNext={() => {
+            if (gameState && gameState.status === 'InProgress') return;
+            setQuestIndex((idx) => (idx + 1) % QUESTS.length);
+          }}
+          onSettings={() => {
+            setShowSettingsModal(true);
+          }}
+        />
+
+        {/* Settings Modal */}
+        {showSettingsModal && (
+          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+            <div className="bg-[#65A369] border-4 border-black p-6 rounded-xl shadow-[6px_6px_0px_rgba(0,0,0,1)] max-w-sm w-full flex flex-col gap-4 font-sans text-black">
+              <div className="flex justify-between items-center border-b-4 border-black pb-2">
+                <h3 className="text-xl font-black uppercase">Settings & Mode</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowSettingsModal(false)}
+                  className="border-2 border-black bg-red-400 font-black px-2 py-0.5 text-sm cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="bg-white border-4 border-black p-3 shadow-brutal flex flex-col gap-1">
+                <span className="text-xs uppercase font-bold text-gray-500">Active Target</span>
+                <span className="text-lg font-black uppercase text-green-700">
+                  {QUESTS[questIndex % QUESTS.length].title} ({activeQuest.targetKeyword})
+                </span>
+                <span className="text-xs text-gray-600 font-bold">
+                  {QUESTS[questIndex % QUESTS.length].description}
+                </span>
+                <span className="text-xs font-black text-black mt-1">
+                  Total Points Claimed: {userScore}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSettingsModal(false);
+                  setAppMode('multiplayer');
+                }}
+                className="w-full bg-[#A3E681] border-4 border-black font-black uppercase py-3 shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none cursor-pointer"
+              >
+                🎮 Multiplayer Room Lobby
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowSettingsModal(false)}
+                className="w-full bg-gray-200 border-4 border-black font-black uppercase py-3 shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none cursor-pointer"
+              >
+                Resume Camera Scan
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // ================= LOBBY VIEW (WHEN NO GAME IS ACTIVE) =================
   if (!gameState) {
     return (
       <div className="app-wrapper">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', background: 'rgba(101, 163, 105, 0.2)', border: '2px solid #65A369', padding: '12px 16px', borderRadius: '12px' }}>
+          <span style={{ fontWeight: 'bold', fontSize: '0.92rem', color: '#A3E681' }}>📸 Solo / Offline Active Quest Scanner</span>
+          <button
+            onClick={() => setAppMode('scanner')}
+            className="mobile-btn mobile-btn-green"
+            style={{ width: 'auto', minHeight: '34px', padding: '4px 16px', fontSize: '0.85rem' }}
+          >
+            Open Scanner
+          </button>
+        </div>
+
         <header className="app-header">
           <h1 className="app-title">🌲 Outdoor Quest</h1>
           <p className="app-subtitle">Multiplayer AI Nature Scavenger Hunt • Offline-Ready PWA</p>
@@ -453,9 +562,11 @@ function App() {
               </div>
 
               {/* State-Gated Quest View with Live Camera Viewfinder */}
-              <QuestView
-                task={gameState.tasks[currentTaskIndex]}
-                onCompleteTask={handleCompleteTask}
+              <QuestScanner
+                targetKeyword={gameState.tasks[currentTaskIndex]?.title?.toLowerCase().trim() || 'bench'}
+                points={gameState.tasks[currentTaskIndex]?.points || 10}
+                onSuccess={handleCompleteTask}
+                onSettings={() => setShowSettingsModal(true)}
               />
             </>
           )}

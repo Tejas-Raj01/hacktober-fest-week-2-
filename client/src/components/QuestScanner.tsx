@@ -67,11 +67,13 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
   };
 
   useEffect(() => {
+    setQuestState('capturing');
+    setCapturedPhotoUrl(null);
     startCameraStream();
     return () => {
       stopCameraStream();
     };
-  }, []);
+  }, [targetKeyword]);
 
   const handleScan = () => {
     if (questState === 'analyzing') return;
@@ -276,3 +278,4 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
 };
 
 export default QuestScanner;
+
