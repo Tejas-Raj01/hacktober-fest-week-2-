@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+@utility shadow-brutal {
+  box-shadow: 4px 4px 0px #000000;
+}
+
 :root {
   --bg-base: #1e1e2e;
   --bg-surface: #313244;
