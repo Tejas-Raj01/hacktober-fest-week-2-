@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Settings, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Settings, ArrowLeft, ArrowRight, SwitchCamera } from 'lucide-react';
 import { analyzeImage } from '../services/vision';
 
 export type QuestState = 'capturing' | 'analyzing' | 'success' | 'rejected';
@@ -25,6 +25,7 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
   const [capturedPhotoUrl, setCapturedPhotoUrl] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [confidence] = useState<number>(85);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -40,7 +41,7 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
     }
   };
 
-  const startCameraStream = async () => {
+  const startCameraStream = async (mode: 'environment' | 'user' = facingMode) => {
     stopCameraStream();
     setCameraError(null);
 
@@ -51,7 +52,9 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: 'environment',
+          facingMode: { ideal: mode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
       });
 
@@ -62,14 +65,30 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
       }
     } catch (err: any) {
       console.warn('[QuestScanner] Camera initialization error:', err);
-      setCameraError(err?.message || 'Unable to access camera.');
+      // Fallback: request default video camera if ideal facingMode fails
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        streamRef.current = fallbackStream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = fallbackStream;
+          await videoRef.current.play();
+        }
+      } catch (fallbackErr: any) {
+        setCameraError(err?.message || 'Unable to access camera.');
+      }
     }
+  };
+
+  const toggleCameraFacing = () => {
+    const nextMode = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextMode);
+    startCameraStream(nextMode);
   };
 
   useEffect(() => {
     setQuestState('capturing');
     setCapturedPhotoUrl(null);
-    startCameraStream();
+    startCameraStream(facingMode);
     return () => {
       stopCameraStream();
     };
@@ -133,7 +152,7 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
   const handleRetake = () => {
     setCapturedPhotoUrl(null);
     setQuestState('capturing');
-    startCameraStream();
+    startCameraStream(facingMode);
   };
 
   return (
@@ -163,9 +182,19 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
 
         {/* 4. The Viewfinder (Centerpiece) */}
         <div className="border-4 border-black bg-gray-700 rounded-xl shadow-[6px_6px_0px_rgba(0,0,0,1)] flex flex-col overflow-hidden relative w-full flex-1 max-h-[65vh]">
-          {/* Header Bar */}
-          <div className="bg-gray-600 text-white font-bold text-center py-2 border-b-4 border-black uppercase tracking-wider text-sm sm:text-base shrink-0">
-            Camera Scan
+          {/* Header Bar with Camera Scan Title and Flip Camera Button */}
+          <div className="bg-gray-600 text-white font-bold py-2 px-3 border-b-4 border-black uppercase tracking-wider text-sm sm:text-base shrink-0 flex items-center justify-between">
+            <span className="w-8" aria-hidden="true" />
+            <span className="font-black tracking-wide">Camera Scan</span>
+            <button
+              type="button"
+              onClick={toggleCameraFacing}
+              className="bg-yellow-400 text-black border-2 border-black rounded-md p-1.5 shadow-[2px_2px_0px_rgba(0,0,0,1)] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all cursor-pointer flex items-center justify-center hover:bg-yellow-300"
+              title={`Flip camera (Current: ${facingMode === 'environment' ? 'Rear' : 'Front'})`}
+              aria-label="Flip camera between front and rear"
+            >
+              <SwitchCamera className="w-5 h-5 stroke-[2.5]" />
+            </button>
           </div>
 
           {/* Camera Feed Area */}
@@ -183,7 +212,7 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover"
+                className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
               />
             )}
 
@@ -193,7 +222,7 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
                 <p className="text-xs font-bold uppercase text-red-300 mb-2">{cameraError}</p>
                 <button
                   type="button"
-                  onClick={startCameraStream}
+                  onClick={() => startCameraStream(facingMode)}
                   className="border-2 border-black bg-yellow-400 text-black px-3 py-1 font-black text-xs uppercase"
                 >
                   Retry Camera
