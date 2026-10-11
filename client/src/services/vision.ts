@@ -63,11 +63,13 @@ export const TARGET_SYNONYMS: Record<string, string[]> = {
 export const VALID_LABELS = TARGET_SYNONYMS;
 
 export const TASK_TARGET_KEYWORDS: Record<number, string> = {
-  1: 'leaf',
-  2: 'rock',
-  3: 'cloud',
-  4: 'tree',
-  5: 'sign',
+  1: 'bench',
+  2: 'stop sign',
+  3: 'fire hydrant',
+  4: 'potted plant',
+  5: 'bird',
+  6: 'bicycle',
+  7: 'dog',
 };
 
 // Singleton pipeline instance and promise
@@ -114,7 +116,7 @@ export async function initializeVisionModel(): Promise<any> {
 
 /**
  * Checks whether a detected label matches the target keyword.
- * Uses exact match, synonym dictionary inclusion, or close substring matching.
+ * Strictly enforces an EXACT match (case-insensitive and trimmed) with zero fuzzy substring matching.
  */
 function isLabelMatch(detectedLabel: string, targetKeyword: string): boolean {
   const normLabel = detectedLabel.toLowerCase().trim();
@@ -122,22 +124,8 @@ function isLabelMatch(detectedLabel: string, targetKeyword: string): boolean {
 
   if (!normLabel || !normTarget) return false;
 
-  // Exact match
-  if (normLabel === normTarget) return true;
-
-  // Close substring match (e.g. "stop sign" contains "sign", "potted plant" contains "plant")
-  if (normLabel.includes(normTarget) || normTarget.includes(normLabel)) return true;
-
-  // Target synonyms / category mapping
-  const synonyms = TARGET_SYNONYMS[normTarget];
-  if (synonyms && Array.isArray(synonyms)) {
-    return synonyms.some((syn) => {
-      const normSyn = syn.toLowerCase().trim();
-      return normLabel === normSyn || normLabel.includes(normSyn) || normSyn.includes(normLabel);
-    });
-  }
-
-  return false;
+  // Exact match ONLY - removes fuzzy substring logic
+  return normLabel === normTarget;
 }
 
 /**

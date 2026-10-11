@@ -8,6 +8,7 @@ export interface CameraCaptureProps {
   onClaimPoints?: (photoUrl: string) => void;
   questTitle?: string;
   questDescription?: string;
+  // Optional task interface compatibility
   task?: { id: number; title: string; description: string; points?: number };
   onCompleteTask?: (photoUrl: string) => void;
 }
@@ -20,23 +21,24 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
   task,
   onCompleteTask,
 }) => {
-  // Normalize props for unified usage
-  const target = (currentQuestTarget || task?.title || 'TREE').toUpperCase().trim();
+  const target = (currentQuestTarget || task?.title || 'BENCH').toLowerCase().trim();
+  const displayTarget = target.toUpperCase();
   const title = questTitle || task?.title || 'ACTIVE QUEST';
   const description = questDescription || task?.description || 'Locate and capture the target item in your surroundings.';
 
   const handleClaim = onClaimPoints || onCompleteTask || (() => {});
 
   const [questState, setQuestState] = useState<QuestState>('capturing');
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [capturedPhotoUrl, setCapturedPhotoUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const stopCamera = () => {
+  // Stop camera tracks cleanly
+  const stopCameraStream = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -44,80 +46,103 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    setIsCameraActive(false);
   };
 
-  const startCamera = async () => {
-    stopCamera();
+  // 1. Live Camera Feed: Request rear camera using environment facingMode
+  const startCameraStream = async () => {
+    stopCameraStream();
+    setCameraError(null);
+
     try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } },
-          audio: false,
-        });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-        setIsCameraActive(true);
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera hardware access is not available on this device/browser.');
       }
-    } catch (err) {
-      console.warn('Camera access error, fallback to file input:', err);
-      setIsCameraActive(false);
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment', // Strictly rear camera for outdoor scanning
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+    } catch (err: any) {
+      console.error('[CameraCapture] Camera access failed:', err);
+      setCameraError(
+        err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError'
+          ? 'CAMERA PERMISSION DENIED. PLEASE ALLOW CAMERA ACCESS IN YOUR BROWSER SETTINGS.'
+          : 'COULD NOT INITIALIZE REAR CAMERA STREAM. PLEASE CHECK CAMERA PERMISSIONS.'
+      );
     }
   };
 
+  // Start live stream when component mounts or target changes
   useEffect(() => {
-    startCamera();
+    setQuestState('capturing');
+    setCapturedPhotoUrl(null);
+    setErrorMessage(null);
+    startCameraStream();
+
     return () => {
-      stopCamera();
+      stopCameraStream();
     };
   }, [target]);
 
-  const processImageBlob = async (blob: Blob) => {
-    stopCamera();
-    setQuestState('analyzing');
-    setErrorMessage(null);
-
-    const previewUrl = URL.createObjectURL(blob);
-    setPhotoPreview(previewUrl);
-
-    try {
-      const isMatch = await analyzeImage(blob, target.toLowerCase());
-
-      if (isMatch) {
-        setQuestState('success');
-      } else {
-        setQuestState('rejected');
-        setErrorMessage(`THAT DOESN'T LOOK LIKE A ${target}! GET CLOSER AND TRY AGAIN.`);
-      }
-    } catch (err: any) {
-      console.error('Vision analysis error:', err);
-      setQuestState('rejected');
-      setErrorMessage(`ANALYSIS FAILED: ${err?.message || 'MODEL ERROR'}. TRY AGAIN.`);
-    }
-  };
-
-  const handleCaptureFromVideo = () => {
+  // 3. Canvas Capture: Draw current video frame to hidden canvas, convert to Blob, and analyze
+  const handleSnapPhoto = () => {
     const video = videoRef.current;
-    if (!video || !isCameraActive) {
-      fileInputRef.current?.click();
+    const canvas = canvasRef.current;
+
+    if (!video || !canvas || video.readyState < 2) {
       return;
     }
 
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    const width = video.videoWidth || 640;
+    const height = video.videoHeight || 480;
+
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // Draw pristine un-mirrored real video frame
+    ctx.drawImage(video, 0, 0, width, height);
 
+    // Stop active camera hardware immediately
+    stopCameraStream();
+
+    // 4. State Machine Integration: Convert to Blob and analyze
     canvas.toBlob(
-      (blob) => {
-        if (blob) {
-          processImageBlob(blob);
+      async (blob) => {
+        if (!blob) return;
+
+        const photoUrl = URL.createObjectURL(blob);
+        setCapturedPhotoUrl(photoUrl);
+
+        // Instantly transition to analyzing state
+        setQuestState('analyzing');
+        setErrorMessage(null);
+
+        try {
+          // Pass image blob to Transformers.js exact match validation
+          const isMatch = await analyzeImage(blob, target);
+
+          if (isMatch) {
+            setQuestState('success');
+          } else {
+            setQuestState('rejected');
+            setErrorMessage(`THAT DOESN'T LOOK LIKE A ${displayTarget}! GET CLOSER AND TRY AGAIN.`);
+          }
+        } catch (err: any) {
+          console.error('[CameraCapture] Vision model error:', err);
+          setQuestState('rejected');
+          setErrorMessage(`VISION MODEL ERROR: ${err?.message || 'ANALYSIS FAILED'}. TRY AGAIN.`);
         }
       },
       'image/jpeg',
@@ -125,30 +150,26 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
     );
   };
 
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      processImageBlob(file);
-    }
-  };
-
   const handleRetake = () => {
     setQuestState('capturing');
-    setPhotoPreview(null);
+    setCapturedPhotoUrl(null);
     setErrorMessage(null);
-    startCamera();
+    startCameraStream();
   };
 
   const handleSubmit = () => {
-    if (questState !== 'success' || !photoPreview) {
+    if (questState !== 'success' || !capturedPhotoUrl) {
       return;
     }
-    handleClaim(photoPreview);
+    handleClaim(capturedPhotoUrl);
   };
 
   return (
     <div className="flex flex-col gap-6 p-4 max-w-md mx-auto bg-slate-900 text-slate-100 min-h-full w-full">
-      {/* 1. Sunlight High-Contrast Quest Card Header */}
+      {/* 2. Hidden Canvas strictly for hardware snapshot conversion (NO FILE INPUTS) */}
+      <canvas ref={canvasRef} style={{ display: 'none' }} />
+
+      {/* Quest Info Card */}
       <div className="border-4 border-black bg-slate-800 p-5 shadow-[4px_4px_0px_rgba(0,0,0,1)] flex flex-col gap-2">
         <div className="flex justify-between items-center">
           <span className="bg-yellow-400 text-black px-3 py-1 font-black text-xs uppercase tracking-widest border-2 border-black">
@@ -164,7 +185,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
 
       {/* Target Keyword Banner */}
       <div className="bg-yellow-400 text-black border-4 border-black font-black uppercase p-3 shadow-[4px_4px_0px_rgba(0,0,0,1)] text-center tracking-wider text-base">
-        🎯 TARGET: {target}
+        🎯 TARGET: {displayTarget}
       </div>
 
       {/* 3. Aggressive State Feedback (The Camera UI Box) */}
@@ -179,17 +200,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
             : 'bg-black border-black'
         }`}
       >
-        {/* Hidden Fallback File Input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={handleFileInputChange}
-          className="hidden"
-        />
-
-        {/* --- STATE: CAPTURING --- */}
+        {/* --- STATE: CAPTURING (LIVE REAR CAMERA FEED ONLY) --- */}
         {questState === 'capturing' && (
           <>
             <video
@@ -197,21 +208,32 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
               autoPlay
               playsInline
               muted
-              className={`w-full h-full object-cover ${isCameraActive ? 'block' : 'hidden'}`}
+              className="w-full h-full object-cover"
             />
-            {!isCameraActive && (
-              <div className="p-6 text-center flex flex-col items-center gap-3">
-                <span className="text-5xl">📸</span>
-                <span className="font-black uppercase tracking-wider text-slate-200">
-                  TAP BUTTON BELOW TO CAPTURE
-                </span>
-              </div>
-            )}
-            {isCameraActive && (
+
+            {/* In-viewfinder reticle framing box */}
+            {!cameraError && (
               <div className="absolute inset-0 pointer-events-none border-4 border-yellow-400 m-4 flex items-center justify-center">
                 <div className="bg-black/80 text-yellow-400 px-3 py-1 font-black text-xs uppercase tracking-widest border-2 border-yellow-400">
-                  CENTER {target} IN FRAME
+                  FRAME {displayTarget} IN CENTER
                 </div>
+              </div>
+            )}
+
+            {/* Camera Error / Permission Fallback */}
+            {cameraError && (
+              <div className="p-6 text-center flex flex-col items-center justify-center gap-2 bg-red-950 text-red-200 w-full h-full">
+                <span className="text-4xl">⚠️</span>
+                <span className="font-black text-xs uppercase tracking-wider leading-relaxed">
+                  {cameraError}
+                </span>
+                <button
+                  type="button"
+                  onClick={startCameraStream}
+                  className="mt-2 px-4 py-2 bg-yellow-400 text-black font-black uppercase text-xs border-2 border-black"
+                >
+                  RETRY CAMERA
+                </button>
               </div>
             )}
           </>
@@ -220,15 +242,19 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
         {/* --- STATE: ANALYZING --- */}
         {questState === 'analyzing' && (
           <div className="w-full h-full relative flex items-center justify-center bg-slate-600">
-            {photoPreview && (
-              <img src={photoPreview} alt="Captured preview" className="w-full h-full object-cover opacity-40" />
+            {capturedPhotoUrl && (
+              <img
+                src={capturedPhotoUrl}
+                alt="Captured frame"
+                className="w-full h-full object-cover opacity-40"
+              />
             )}
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
               <span className="text-3xl font-black uppercase tracking-widest text-white drop-shadow-[2px_2px_0px_rgba(0,0,0,1)] animate-pulse">
                 ANALYZING...
               </span>
               <span className="text-xs font-black uppercase tracking-wider text-slate-200 bg-black/80 px-2 py-1">
-                RUNNING VISION MODEL
+                RUNNING OBJECT DETECTION
               </span>
             </div>
           </div>
@@ -253,7 +279,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
               TARGET VERIFIED!
             </span>
             <p className="font-black text-sm uppercase text-green-900">
-              {target} SUCCESSFULLY DETECTED BY AI
+              {displayTarget} DETECTED WITH &gt; 50% CONFIDENCE
             </p>
           </div>
         )}
@@ -261,27 +287,19 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
 
       {/* 2. "Fat Finger" Tactile Action Buttons */}
       <div className="flex flex-col gap-4">
-        {/* Capturing Actions */}
+        {/* Capturing Mode: Oversized Live Shutter Button */}
         {questState === 'capturing' && (
-          <div className="flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={handleCaptureFromVideo}
-              className="h-16 w-full bg-green-500 border-4 border-black font-black uppercase tracking-wider text-black shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-all active:translate-x-[4px] active:translate-y-[4px] active:shadow-none flex items-center justify-center text-lg cursor-pointer"
-            >
-              📸 SNAP PHOTO NOW
-            </button>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="h-14 w-full bg-slate-700 border-4 border-black font-black uppercase tracking-wider text-slate-100 shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-all active:translate-x-[4px] active:translate-y-[4px] active:shadow-none flex items-center justify-center text-sm cursor-pointer"
-            >
-              📁 CHOOSE FROM GALLERY
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleSnapPhoto}
+            disabled={Boolean(cameraError)}
+            className="h-16 w-full bg-green-500 border-4 border-black font-black uppercase tracking-wider text-black shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-all active:translate-x-[4px] active:translate-y-[4px] active:shadow-none flex items-center justify-center text-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            📸 SNAP LIVE PHOTO
+          </button>
         )}
 
-        {/* Analyzing Lockout */}
+        {/* Analyzing Mode: Locked Button */}
         {questState === 'analyzing' && (
           <button
             type="button"
@@ -292,7 +310,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
           </button>
         )}
 
-        {/* Rejected: Retake Button Styled with bg-red-500 border-red-900 */}
+        {/* Rejected Mode: Chunky Retake Button */}
         {questState === 'rejected' && (
           <button
             type="button"
@@ -303,7 +321,7 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
           </button>
         )}
 
-        {/* Success: Strict Submit & Claim Points Button Gating */}
+        {/* Success Mode: Strictly Gated Submit Button */}
         {questState === 'success' && (
           <div className="flex flex-col gap-3">
             <button

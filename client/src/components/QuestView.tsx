@@ -46,7 +46,7 @@ export const QuestView: React.FC<QuestViewProps> = ({
   const effectiveTarget = (
     targetKeyword ||
     TASK_TARGET_KEYWORDS[task.id] ||
-    'leaf'
+    'bench'
   ).toLowerCase().trim();
 
   // Stop camera tracks cleanly
