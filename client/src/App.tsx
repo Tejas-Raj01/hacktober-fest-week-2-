@@ -12,14 +12,19 @@ function App() {
   const [roomCode, setRoomCode] = useState('');
   const [playerId, setPlayerId] = useState('');
   const [displayedLore, setDisplayedLore] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState(false);
 
   const [serverUrl, setServerUrl] = useState<string>(() => {
-    return localStorage.getItem('oq_server_url') || 
-      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-        ? 'ws://localhost:8080/ws' 
-        : 'wss://hacktober-fest-week-2-7n52.onrender.com/ws');
+    return (
+      localStorage.getItem('oq_server_url') ||
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? 'ws://localhost:8080/ws'
+        : 'wss://hacktober-fest-week-2-7n52.onrender.com/ws')
+    );
   });
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>(
+    'connecting'
+  );
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
   const [wsReady, setWsReady] = useState(false);
@@ -64,32 +69,39 @@ function App() {
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'GameCreated' || data.type === 'GameJoined' || data.type === 'StateUpdate') {
-          setGameState(data.payload.state);
-          if (data.payload.player_id) {
+        switch (data.type) {
+          case 'GameCreated':
             setPlayerId(data.payload.player_id);
-          }
-        }
-
-        if (data.type === 'Error') {
-          setLobbyError(`Server Error: ${data.payload.message}`);
-        }
-
-        if (data.type === 'StateUpdate' && data.payload.state?.last_proof?.lore) {
-          setDisplayedLore(data.payload.state.last_proof.lore);
+            setGameState(data.payload.state);
+            break;
+          case 'GameJoined':
+            setPlayerId(data.payload.player_id);
+            setGameState(data.payload.state);
+            break;
+          case 'StateUpdate':
+            setGameState(data.payload.state);
+            break;
+          case 'LoreEvent':
+            setDisplayedLore(data.payload.lore);
+            break;
+          case 'Error':
+            setLobbyError(`Server Error: ${data.payload.message}`);
+            break;
+          default:
+            break;
         }
       } catch (e) {
-        console.error('Failed to parse WebSocket message', e);
+        console.error('Error parsing WebSocket message:', e);
       }
     };
 
-    setWs(socket);
     wsRef.current = socket;
+    setWs(socket);
   };
 
   useEffect(() => {
-    VisionService.initialize();
     connectWs(serverUrl);
+    VisionService.initialize();
 
     return () => {
       if (wsRef.current) {
@@ -99,7 +111,6 @@ function App() {
       }
     };
   }, [serverUrl]);
-
 
   const switchServerUrl = (newUrl: string) => {
     localStorage.setItem('oq_server_url', newUrl);
@@ -150,51 +161,58 @@ function App() {
       room_code: gameState.room_code,
       player_id: playerId,
       proof: verifiedProof,
-      task_index: gameState.current_task_index
+      task_index: gameState.current_task_index,
     });
-    
-    // Optimistic UI update (simulate moving to next task if possible)
+
+    // Optimistic UI update
     if (gameState.current_task_index + 1 < gameState.tasks.length) {
-       setGameState((prev: any) => ({
-         ...prev,
-         current_task_index: prev.current_task_index + 1
-       }));
+      setGameState((prev: any) => ({
+        ...prev,
+        current_task_index: prev.current_task_index + 1,
+      }));
     } else {
-       setGameState((prev: any) => ({
-         ...prev,
-         status: 'Finished'
-       }));
+      setGameState((prev: any) => ({
+        ...prev,
+        status: 'Finished',
+      }));
     }
+  };
+
+  const copyRoomCode = () => {
+    if (!gameState?.room_code) return;
+    navigator.clipboard.writeText(gameState.room_code);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
   };
 
   const leaveGame = () => {
     window.location.reload();
   };
 
+  // ================= LOBBY VIEW (WHEN NO GAME IS ACTIVE) =================
   if (!gameState) {
     return (
       <div className="app-wrapper">
-        <h1 className="app-title">🌲 Outdoor Quest</h1>
-        <p className="app-subtitle">Multiplayer Outdoor Quest Game</p>
+        <header className="app-header">
+          <h1 className="app-title">🌲 Outdoor Quest</h1>
+          <p className="app-subtitle">Multiplayer AI Nature Scavenger Hunt • Offline-Ready PWA</p>
+        </header>
 
-        {/* Connection status banner */}
-        <div style={{
-          background: '#1e1e2e',
-          padding: '12px 16px',
-          borderRadius: '10px',
-          border: '1px solid #313244',
-          marginBottom: '20px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.9em', color: '#a6adc8' }}>Server:</span>
-            <span style={{
-              fontWeight: 'bold',
-              fontSize: '0.9em',
-              color: connectionStatus === 'connected' ? '#a6e3a1' : connectionStatus === 'connecting' ? '#f9e2af' : '#f38ba8'
-            }}>
+        {/* Server Connection Banner */}
+        <div className="connection-bar">
+          <div className="connection-bar-header">
+            <span style={{ color: 'var(--text-sub)' }}>Server Backend:</span>
+            <span
+              style={{
+                fontWeight: 'bold',
+                color:
+                  connectionStatus === 'connected'
+                    ? 'var(--accent-green)'
+                    : connectionStatus === 'connecting'
+                    ? 'var(--accent-yellow)'
+                    : 'var(--accent-red)',
+              }}
+            >
               {connectionStatus === 'connected' && '🟢 Connected'}
               {connectionStatus === 'connecting' && '🟡 Connecting...'}
               {connectionStatus === 'disconnected' && '🔴 Disconnected'}
@@ -202,18 +220,12 @@ function App() {
             </span>
           </div>
 
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '4px' }}>
+          <div className="server-btn-group">
             <button
               onClick={() => switchServerUrl('ws://localhost:8080/ws')}
               style={{
-                padding: '6px 12px',
-                fontSize: '0.82em',
-                background: serverUrl.includes('localhost') ? '#89b4fa' : '#313244',
-                color: serverUrl.includes('localhost') ? '#11111b' : '#cdd6f4',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
+                background: serverUrl.includes('localhost') ? 'var(--accent-blue)' : 'var(--bg-surface)',
+                color: serverUrl.includes('localhost') ? '#11111b' : 'var(--text-main)',
               }}
             >
               Local (8080)
@@ -221,14 +233,8 @@ function App() {
             <button
               onClick={() => switchServerUrl('wss://hacktober-fest-week-2-7n52.onrender.com/ws')}
               style={{
-                padding: '6px 12px',
-                fontSize: '0.82em',
-                background: serverUrl.includes('onrender.com') ? '#89b4fa' : '#313244',
-                color: serverUrl.includes('onrender.com') ? '#11111b' : '#cdd6f4',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
+                background: serverUrl.includes('onrender.com') ? 'var(--accent-blue)' : 'var(--bg-surface)',
+                color: serverUrl.includes('onrender.com') ? '#11111b' : 'var(--text-main)',
               }}
             >
               Cloud (Render)
@@ -236,168 +242,94 @@ function App() {
             <button
               onClick={() => connectWs(serverUrl)}
               style={{
-                padding: '6px 12px',
-                fontSize: '0.82em',
-                background: '#45475a',
-                color: '#cdd6f4',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer'
+                background: 'var(--bg-surface)',
+                color: 'var(--text-main)',
               }}
             >
-              🔄 Retry
+              🔄 Reconnect
             </button>
           </div>
 
           {connectionStatus === 'connecting' && (
-            <p style={{ fontSize: '0.8em', color: '#f9e2af', margin: '4px 0 0' }}>
-              ⏳ Connecting to backend... (If using Render free tier, spin-up may take 30–50s)
-            </p>
-          )}
-          {connectionStatus === 'error' && (
-            <p style={{ fontSize: '0.8em', color: '#f38ba8', margin: '4px 0 0' }}>
-              Make sure your server is running (e.g. <code>cargo run</code> in server folder) or switch to Cloud above.
+            <p style={{ fontSize: '0.8rem', color: 'var(--accent-yellow)', margin: '2px 0 0' }}>
+              ⏳ Connecting to server... (Render cloud spin-up takes ~30s on cold start)
             </p>
           )}
         </div>
 
-        {/* Error / Alert box */}
+        {/* Lobby Error Alert */}
         {lobbyError && (
-          <div style={{
-            background: '#f38ba8',
-            color: '#11111b',
-            padding: '12px',
-            borderRadius: '8px',
-            fontWeight: 'bold',
-            marginBottom: '20px'
-          }}>
+          <div
+            style={{
+              background: 'rgba(243, 139, 168, 0.15)',
+              border: '1px solid var(--accent-red)',
+              color: 'var(--accent-red)',
+              padding: '14px',
+              borderRadius: '10px',
+              fontWeight: 'bold',
+            }}
+          >
             {lobbyError}
           </div>
         )}
 
-        {/* Player Name Input */}
-        <div style={{
-          background: '#1e1e2e',
-          padding: '20px',
-          borderRadius: '12px',
-          border: '1px solid #313244',
-          marginBottom: '20px',
-          textAlign: 'left'
-        }}>
-          <label style={{ display: 'block', color: '#a6adc8', fontSize: '0.9em', marginBottom: '8px', fontWeight: 'bold' }}>
-            Your Name:
+        {/* Player Name Input Card */}
+        <div className="mobile-card">
+          <label style={{ display: 'block', color: 'var(--text-sub)', fontSize: '0.92rem', marginBottom: '8px', fontWeight: 'bold' }}>
+            👤 Player Name:
           </label>
           <input
-            placeholder="Enter your Player Name..."
+            className="mobile-input"
+            placeholder="Enter your adventurer name..."
             value={playerName}
-            onChange={e => {
+            onChange={(e) => {
               setPlayerName(e.target.value);
               if (lobbyError) setLobbyError(null);
             }}
-            onKeyDown={e => {
+            onKeyDown={(e) => {
               if (e.key === 'Enter') createGame();
-            }}
-            style={{
-              width: '100%',
-              boxSizing: 'border-box',
-              padding: '12px 14px',
-              fontSize: '1em',
-              background: '#313244',
-              border: '1px solid #45475a',
-              borderRadius: '8px',
-              color: '#cdd6f4',
-              outline: 'none'
             }}
           />
         </div>
 
-        {/* Actions Cards */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Create Game Card */}
-          <div style={{
-            background: '#1e1e2e',
-            padding: '20px',
-            borderRadius: '12px',
-            border: '1px solid #313244'
-          }}>
-            <h3 style={{ color: '#89b4fa', margin: '0 0 10px 0' }}>👑 Host a New Game</h3>
-            <p style={{ color: '#a6adc8', fontSize: '0.9em', margin: '0 0 16px 0' }}>
-              Create a room and invite your friends with a code.
+        {/* Responsive Lobby Cards (Side-by-side on Laptop, Stacked on Mobile) */}
+        <div className="lobby-grid">
+          {/* Create Room Card */}
+          <div className="mobile-card">
+            <h3 className="mobile-card-title">
+              <span>👑</span> Host a New Game
+            </h3>
+            <p className="mobile-card-desc">
+              Generate a unique room code, gather fellow players, and launch an outdoor expedition.
             </p>
-            <button
-              onClick={createGame}
-              style={{
-                width: '100%',
-                padding: '14px',
-                fontSize: '1.05em',
-                background: '#89b4fa',
-                color: '#11111b',
-                fontWeight: 'bold',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                transition: 'background 0.2s',
-                boxShadow: '0 4px 12px rgba(137, 180, 250, 0.3)'
-              }}
-            >
-              🎮 Create Game
+            <button onClick={createGame} className="mobile-btn mobile-btn-blue">
+              🎮 Create Game Room
             </button>
           </div>
 
-          {/* Join Game Card */}
-          <div style={{
-            background: '#1e1e2e',
-            padding: '20px',
-            borderRadius: '12px',
-            border: '1px solid #313244'
-          }}>
-            <h3 style={{ color: '#a6e3a1', margin: '0 0 10px 0' }}>🚀 Join Existing Game</h3>
-            <p style={{ color: '#a6adc8', fontSize: '0.9em', margin: '0 0 16px 0' }}>
-              Enter the room code shared by the host.
+          {/* Join Room Card */}
+          <div className="mobile-card">
+            <h3 className="mobile-card-title">
+              <span>🚀</span> Join Existing Room
+            </h3>
+            <p className="mobile-card-desc">
+              Have a room code from the host? Enter it below to jump directly into the lobby.
             </p>
             <input
+              className="mobile-input"
               placeholder="Room Code (e.g. QUEST-1234)"
               value={roomCode}
-              onChange={e => {
+              onChange={(e) => {
                 setRoomCode(e.target.value);
                 if (lobbyError) setLobbyError(null);
               }}
-              onKeyDown={e => {
+              onKeyDown={(e) => {
                 if (e.key === 'Enter') joinGame();
               }}
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: '12px 14px',
-                fontSize: '1em',
-                background: '#313244',
-                border: '1px solid #45475a',
-                borderRadius: '8px',
-                color: '#cdd6f4',
-                outline: 'none',
-                marginBottom: '12px',
-                textAlign: 'center',
-                letterSpacing: '1px',
-                fontWeight: 'bold'
-              }}
+              style={{ textAlign: 'center', letterSpacing: '2px', fontWeight: 'bold' }}
             />
-            <button
-              onClick={joinGame}
-              style={{
-                width: '100%',
-                padding: '14px',
-                fontSize: '1.05em',
-                background: '#a6e3a1',
-                color: '#11111b',
-                fontWeight: 'bold',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                transition: 'background 0.2s',
-                boxShadow: '0 4px 12px rgba(166, 227, 161, 0.3)'
-              }}
-            >
-              Join Game
+            <button onClick={joinGame} className="mobile-btn mobile-btn-green">
+              ⚡ Join Room
             </button>
           </div>
         </div>
@@ -405,73 +337,199 @@ function App() {
     );
   }
 
+  // ================= IN-GAME VIEW (LOBBY / IN-PROGRESS / FINISHED) =================
   const isHost = gameState.players?.find((p: any) => p.id === playerId)?.is_host;
+  const sortedPlayers = [...(gameState.players || [])].sort((a: any, b: any) => (b.score || 0) - (a.score || 0));
+  const currentTaskIndex = gameState.current_task_index || 0;
+  const totalTasks = gameState.tasks?.length || 1;
+  const progressPercent = Math.min(100, Math.round(((currentTaskIndex) / totalTasks) * 100));
 
   return (
     <div className="app-wrapper">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '10px 0' }}>
-        <button 
+      {/* Top Navigation Bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+        <button
           onClick={leaveGame}
           className="mobile-btn mobile-btn-red"
-          style={{ width: 'auto', minHeight: '38px', padding: '8px 16px', fontSize: '0.9em' }}
+          style={{ width: 'auto', minHeight: '38px', padding: '6px 16px', fontSize: '0.88rem' }}
         >
-          Leave Game
+          🚪 Leave
         </button>
-        <h3 style={{ color: '#cdd6f4', margin: 0 }}>Status: {gameState.status}</h3>
-      </div>
 
-      <div style={{ background: '#1e1e2e', padding: '20px', borderRadius: '12px', textAlign: 'center', margin: '20px 0', border: '1px solid #313244' }}>
-        <h2 style={{ margin: '0 0 15px 0', color: '#a6adc8', fontSize: '1.2em' }}>Room Code</h2>
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px' }}>
-           <code style={{ fontSize: '2.5em', background: '#313244', padding: '10px 25px', borderRadius: '8px', color: '#a6e3a1', fontWeight: 'bold', letterSpacing: '2px' }}>
-              {gameState.room_code}
-           </code>
-           <button 
-             onClick={() => navigator.clipboard.writeText(gameState.room_code)}
-             style={{ padding: '10px 15px', background: '#45475a', color: '#cdd6f4', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
-           >
-             Copy
-           </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span
+            style={{
+              padding: '6px 12px',
+              borderRadius: '20px',
+              fontSize: '0.82rem',
+              fontWeight: 'bold',
+              background:
+                gameState.status === 'InProgress'
+                  ? 'rgba(34, 197, 94, 0.2)'
+                  : gameState.status === 'Lobby'
+                  ? 'rgba(137, 180, 250, 0.2)'
+                  : 'rgba(249, 226, 175, 0.2)',
+              color:
+                gameState.status === 'InProgress'
+                  ? 'var(--accent-green)'
+                  : gameState.status === 'Lobby'
+                  ? 'var(--accent-blue)'
+                  : 'var(--accent-yellow)',
+              border: '1px solid currentColor',
+            }}
+          >
+            {gameState.status === 'Lobby' && '⏳ Waiting Lobby'}
+            {gameState.status === 'InProgress' && '🌲 Quest Active'}
+            {gameState.status === 'Finished' && '🏆 Game Finished'}
+          </span>
         </div>
       </div>
-      
-      {gameState.status === 'Lobby' && (
-        <div style={{ textAlign: 'center', padding: '30px' }}>
-          <h2 style={{ color: '#cdd6f4', marginBottom: '20px' }}>Waiting for players...</h2>
-          {isHost ? (
-            <button 
-              onClick={startGame}
-              style={{ padding: '15px 30px', fontSize: '1.2em', background: '#89b4fa', color: '#11111b', fontWeight: 'bold', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
-            >
-              Start Game
-            </button>
-          ) : (
-            <p style={{ color: '#a6adc8', fontSize: '1.2em' }}>Waiting for the host to start the game...</p>
+
+      {/* Main Responsive Grid (2 Columns on Laptop / 1 Column on Phone) */}
+      <div className="game-grid">
+        {/* LEFT COLUMN: ACTIVE QUEST / LOBBY / FINISH CARD */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* LOBBY STATE */}
+          {gameState.status === 'Lobby' && (
+            <div className="mobile-card" style={{ textAlign: 'center', padding: '36px 20px' }}>
+              <div style={{ fontSize: '3rem', marginBottom: '12px' }}>🏕️</div>
+              <h2 style={{ color: 'var(--text-main)', margin: '0 0 10px 0' }}>Expedition Basecamp</h2>
+              <p style={{ color: 'var(--text-sub)', fontSize: '1rem', margin: '0 0 24px 0' }}>
+                Waiting for participants to join the lobby before launching the hunt.
+              </p>
+
+              {isHost ? (
+                <button
+                  onClick={startGame}
+                  className="mobile-btn mobile-btn-blue"
+                  style={{ maxWidth: '280px', margin: '0 auto', fontSize: '1.1rem' }}
+                >
+                  🚀 Start Game (Host)
+                </button>
+              ) : (
+                <div
+                  style={{
+                    padding: '12px 20px',
+                    background: 'var(--bg-surface)',
+                    borderRadius: '10px',
+                    color: 'var(--text-sub)',
+                    display: 'inline-block',
+                  }}
+                >
+                  ⏳ Waiting for the room host to start the game...
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* IN-PROGRESS QUEST */}
+          {gameState.status === 'InProgress' && gameState.tasks?.[currentTaskIndex] && (
+            <>
+              {/* Quest Progress Tracker */}
+              <div
+                style={{
+                  background: 'var(--bg-mantle)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '12px',
+                  padding: '12px 16px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.86rem', marginBottom: '8px' }}>
+                  <span style={{ color: 'var(--text-sub)' }}>
+                    Quest <strong>{currentTaskIndex + 1}</strong> of <strong>{totalTasks}</strong>
+                  </span>
+                  <span style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>{progressPercent}% Complete</span>
+                </div>
+                <div style={{ width: '100%', height: '8px', background: 'var(--bg-surface)', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${progressPercent}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #38bdf8, #22c55e)',
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* State-Gated Quest View with Live Camera Viewfinder */}
+              <QuestView
+                task={gameState.tasks[currentTaskIndex]}
+                onCompleteTask={handleCompleteTask}
+              />
+            </>
+          )}
+
+          {/* FINISHED STATE */}
+          {gameState.status === 'Finished' && (
+            <div className="mobile-card" style={{ textAlign: 'center', padding: '36px 20px' }}>
+              <div style={{ fontSize: '3.5rem', marginBottom: '12px' }}>🏆</div>
+              <h2 style={{ color: 'var(--accent-yellow)', margin: '0 0 10px 0' }}>Expedition Completed!</h2>
+              <p style={{ color: 'var(--text-sub)', fontSize: '1rem', margin: '0 0 24px 0' }}>
+                All nature quests have been completed. Check out the final leaderboard scores!
+              </p>
+              <button
+                onClick={leaveGame}
+                className="mobile-btn mobile-btn-green"
+                style={{ maxWidth: '280px', margin: '0 auto' }}
+              >
+                🌲 Return to Basecamp
+              </button>
+            </div>
           )}
         </div>
-      )}
 
-      {gameState.status === 'InProgress' && gameState.tasks[gameState.current_task_index] && (
-        <QuestView
-          task={gameState.tasks[gameState.current_task_index]}
-          onCompleteTask={handleCompleteTask}
-        />
-      )}
+        {/* RIGHT COLUMN: ROOM CODE & LEADERBOARD SCOREBOARD */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Room Code Card with One-Click Copy */}
+          <div className="room-code-display">
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-sub)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              Room Code
+            </span>
+            <span className="room-code-pill">{gameState.room_code}</span>
+            <button
+              onClick={copyRoomCode}
+              className="mobile-btn mobile-btn-subtle"
+              style={{ minHeight: '36px', fontSize: '0.85rem', width: 'auto', padding: '6px 18px' }}
+            >
+              {copiedCode ? '✅ Copied!' : '📋 Copy Code'}
+            </button>
+          </div>
 
-      {gameState.players && gameState.players.length > 0 && (
-        <div style={{ background: '#1e1e2e', padding: '20px', borderRadius: '12px', marginTop: '30px', border: '1px solid #313244' }}>
-          <h3 style={{ margin: '0 0 15px 0', color: '#a6adc8' }}>Scoreboard</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {gameState.players.map((p: any) => (
-              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#313244', borderRadius: '6px' }}>
-                <span style={{ color: '#cdd6f4', fontWeight: 'bold' }}>{p.name} {p.is_host && '👑'}</span>
-                <span style={{ color: '#a6e3a1', fontWeight: 'bold' }}>{p.score} pts</span>
-              </div>
-            ))}
+          {/* Scoreboard Card */}
+          <div className="scoreboard-card">
+            <h3 style={{ margin: '0 0 14px 0', color: 'var(--text-main)', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>🏅</span> Leaderboard
+            </h3>
+
+            <div className="scoreboard-list">
+              {sortedPlayers.map((p: any, idx: number) => {
+                const isCurrentPlayer = p.id === playerId;
+                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
+
+                return (
+                  <div
+                    key={p.id}
+                    className={`scoreboard-row ${isCurrentPlayer ? 'is-current' : ''}`}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span className="rank-badge">{medal}</span>
+                      <span style={{ fontWeight: isCurrentPlayer ? 'bold' : 'normal', color: 'var(--text-main)' }}>
+                        {p.name} {p.is_host && '👑'} {isCurrentPlayer && <small style={{ color: 'var(--accent-green)' }}>(You)</small>}
+                      </span>
+                    </div>
+                    <span style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>
+                      {p.score || 0} pts
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
-      )}
+      </div>
 
+      {/* Lore Modal Component */}
       <LoreModal lore={displayedLore} onClose={() => setDisplayedLore(null)} />
     </div>
   );

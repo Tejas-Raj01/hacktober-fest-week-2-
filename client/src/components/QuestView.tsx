@@ -4,11 +4,8 @@ import VisionService, {
   type VerificationResult,
 } from '../services/vision';
 
-/**
- * 1. Explicit States:
- * Strict State Machine for Quest Photo Verification
- */
 export type QuestState = 'capturing' | 'analyzing' | 'success' | 'rejected';
+export type CaptureMode = 'camera' | 'upload';
 
 export interface QuestTask {
   id: number;
@@ -30,63 +27,103 @@ export const QuestView: React.FC<QuestViewProps> = ({
   onCompleteTask,
   disabled = false,
 }) => {
-  // 1. Explicit State Machine variable
+  // Strict State Machine variable
   const [questState, setQuestState] = useState<QuestState>('capturing');
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('camera');
   const [proof, setProof] = useState<string | null>(null);
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Live Camera states
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Derive target keyword from prop or standard dictionary
   const effectiveTarget = (
     targetKeyword ||
     TASK_TARGET_KEYWORDS[task.id] ||
     'leaf'
   ).toLowerCase().trim();
 
-  // Reset state whenever the active task changes
-  useEffect(() => {
-    setQuestState('capturing');
-    setProof(null);
-    setVerificationResult(null);
-    setErrorMessage(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+  // Stop camera tracks cleanly
+  const stopCameraStream = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     }
-  }, [task.id]);
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraActive(false);
+  };
 
-  /**
-   * 3. The 'Analyzing' Flow:
-   * When photo is chosen, immediately transition to 'analyzing', disable inputs,
-   * run Transformers.js object detection, then transition to 'success' or 'rejected'.
-   */
-  const handlePhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Start live webcam or mobile camera feed
+  const startCameraStream = async (mode: 'environment' | 'user' = facingMode) => {
+    stopCameraStream();
+    setCameraError(null);
 
-    // Immediately enter 'analyzing' state and lock inputs
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera API is not supported in this browser. Please use file upload.');
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: mode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setIsCameraActive(true);
+    } catch (err: any) {
+      console.warn('[QuestView] Camera stream error:', err);
+      setCameraError(
+        err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError'
+          ? 'Camera permission was denied. Please allow camera access or switch to upload.'
+          : 'Could not access device camera. Please switch to file upload.'
+      );
+      setIsCameraActive(false);
+    }
+  };
+
+  // Switch between front and back camera
+  const toggleCameraFacing = () => {
+    const nextMode = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextMode);
+    if (isCameraActive) {
+      startCameraStream(nextMode);
+    }
+  };
+
+  // Process photo blob through Vision AI
+  const processPhotoBlob = async (blob: Blob) => {
+    stopCameraStream();
     setQuestState('analyzing');
     setVerificationResult(null);
     setErrorMessage(null);
 
-    // Read local image preview for immediate display
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setProof(ev.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+    // Create local object URL for preview
+    const previewUrl = URL.createObjectURL(blob);
+    setProof(previewUrl);
 
     try {
-      // Execute object detection pipeline with >= 0.50 confidence threshold
-      const result = await VisionService.verifyTaskProof(task.id, file, 0.50);
+      const result = await VisionService.verifyTaskProof(task.id, blob, 0.50);
       setVerificationResult(result);
 
       if (result.success) {
-        // 5. The 'Success' Flow
         setQuestState('success');
       } else {
-        // 4. The 'Rejected' Flow
         setQuestState('rejected');
         setErrorMessage(
           result.reason ||
@@ -95,7 +132,6 @@ export const QuestView: React.FC<QuestViewProps> = ({
       }
     } catch (err: any) {
       console.error('[QuestView] Vision analysis error:', err);
-      // 4. Fallback to 'rejected' state on error
       setQuestState('rejected');
       setErrorMessage(
         `Analysis failed: ${err?.message || 'Could not process photo'}. Please try another photo.`
@@ -103,27 +139,88 @@ export const QuestView: React.FC<QuestViewProps> = ({
     }
   };
 
-  /**
-   * 4. Retake Handler for 'rejected' flow or user reset
-   */
-  const handleRetake = () => {
+  // Capture snapshot from live video feed
+  const captureSnapshot = () => {
+    const video = videoRef.current;
+    if (!video || !isCameraActive) return;
+
+    const width = video.videoWidth || 640;
+    const height = video.videoHeight || 480;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Flip horizontally if front-facing selfie camera for natural mirror feel
+    if (facingMode === 'user') {
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
+    }
+
+    ctx.drawImage(video, 0, 0, width, height);
+
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          processPhotoBlob(blob);
+        }
+      },
+      'image/jpeg',
+      0.9
+    );
+  };
+
+  // Handle file chosen via file picker
+  const handlePhotoFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processPhotoBlob(file);
+  };
+
+  // Reset state whenever active task changes
+  useEffect(() => {
     setQuestState('capturing');
     setProof(null);
     setVerificationResult(null);
     setErrorMessage(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+    // Automatically boot camera if on capturing state and camera mode
+    if (captureMode === 'camera') {
+      startCameraStream();
+    }
+    return () => {
+      stopCameraStream();
+    };
+  }, [task.id]);
+
+  // Clean up stream on unmount
+  useEffect(() => {
+    return () => {
+      stopCameraStream();
+    };
+  }, []);
+
+  // Retake photo action
+  const handleRetake = () => {
+    setQuestState('capturing');
+    setProof(null);
+    setVerificationResult(null);
+    setErrorMessage(null);
+    if (captureMode === 'camera') {
+      startCameraStream();
+    } else if (fileInputRef.current) {
+      fileInputRef.current.value = '';
       fileInputRef.current.click();
     }
   };
 
-  /**
-   * 5. Submit Handler (strictly gated by state === 'success')
-   */
+  // Submit action (strictly gated by state === 'success')
   const handleSubmit = () => {
-    // Strict Guard: Absolutely impossible to submit unless state is 'success'
     if (questState !== 'success' || !proof) {
-      console.warn('[QuestView] Submission blocked: State is not "success"');
       return;
     }
     onCompleteTask(proof);
@@ -131,177 +228,298 @@ export const QuestView: React.FC<QuestViewProps> = ({
 
   return (
     <div className="quest-hero-card">
-      <div className="quest-tag">Active Quest</div>
+      <div className="quest-header-badge">
+        <span className="quest-tag">Active Quest</span>
+        <span className="quest-points-tag">⭐ +10 Points</span>
+      </div>
+
       <h2 className="quest-heading">{task.title}</h2>
       <p className="quest-instruction">{task.description}</p>
 
       {/* Target Keyword Badge */}
       <div className="target-badge">
-        🎯 Target Object: <strong>"{effectiveTarget}"</strong> (min confidence: 50%)
+        <span className="target-icon">🎯</span>
+        <span>Target Object: <strong>"{effectiveTarget}"</strong> (Required AI Confidence &gt; 50%)</span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '10px' }}>
-        {/* Preview Container */}
-        {proof && (
-          <div
-            className="photo-preview-wrap"
-            style={{
-              border:
-                questState === 'success'
-                  ? '2px solid var(--accent-green)'
-                  : questState === 'rejected'
-                  ? '2px solid var(--accent-red)'
-                  : '2px solid var(--accent-blue)',
-            }}
-          >
-            <img src={proof} alt="Quest preview" className="photo-preview-img" />
-          </div>
-        )}
-
-        {/* Hidden File Input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={handlePhotoSelected}
-          style={{ display: 'none' }}
-          disabled={disabled || questState === 'analyzing'}
-        />
-
-        {/* STATE MACHINE RENDERINGS */}
-
-        {/* STATE: 'capturing' */}
+      <div className="quest-body-container">
+        {/* ================= STATE: 'capturing' ================= */}
         {questState === 'capturing' && (
-          <button
-            type="button"
-            className="photo-capture-box"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={disabled}
-            style={{
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              background: 'transparent',
-              border: '2px dashed var(--accent-blue)',
-              color: 'var(--accent-blue)',
-            }}
-          >
-            <span>📸 Take / Upload Photo of "{effectiveTarget}"</span>
-          </button>
-        )}
-
-        {/* STATE: 'analyzing' */}
-        {questState === 'analyzing' && (
-          <div
-            style={{
-              background: 'var(--bg-mantle)',
-              border: '1px solid var(--accent-blue)',
-              padding: '16px',
-              borderRadius: '10px',
-              color: 'var(--accent-blue)',
-              textAlign: 'center',
-              fontWeight: 'bold',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            <div style={{ fontSize: '1.4rem' }}>🤖</div>
-            <div>Analyzing photo with AI Object Detection...</div>
-            <div style={{ fontSize: '0.85rem', opacity: 0.85, fontWeight: 'normal' }}>
-              Scanning image for target: "{effectiveTarget}" (50% threshold)
-            </div>
-          </div>
-        )}
-
-        {/* STATE: 'rejected' */}
-        {questState === 'rejected' && (
-          <div className="verify-box verify-box-error">
-            <div style={{ fontWeight: 'bold', fontSize: '1.05rem', marginBottom: '6px' }}>
-              ❌ That doesn't look like a {effectiveTarget}!
-            </div>
-            <div style={{ fontSize: '0.9rem', lineHeight: '1.4' }}>
-              {errorMessage || `Could not find a distinct ${effectiveTarget} with >= 50% confidence.`}
-            </div>
-            <div style={{ fontSize: '0.82rem', marginTop: '8px', color: 'var(--text-main)' }}>
-              💡 <em>Tip: Get closer, ensure good natural lighting, and frame the item clearly.</em>
+          <div className="capture-flow-wrap">
+            {/* Mode Switcher Tabs */}
+            <div className="capture-mode-tabs">
+              <button
+                type="button"
+                className={`mode-tab-btn ${captureMode === 'camera' ? 'active' : ''}`}
+                onClick={() => {
+                  setCaptureMode('camera');
+                  startCameraStream();
+                }}
+              >
+                📷 Live Camera Viewfinder
+              </button>
+              <button
+                type="button"
+                className={`mode-tab-btn ${captureMode === 'upload' ? 'active' : ''}`}
+                onClick={() => {
+                  stopCameraStream();
+                  setCaptureMode('upload');
+                }}
+              >
+                📁 Upload / Gallery File
+              </button>
             </div>
 
-            {/* Retake Photo Button */}
-            <button
-              type="button"
-              onClick={handleRetake}
-              className="mobile-btn"
-              style={{
-                marginTop: '12px',
-                background: '#45475a',
-                color: '#cdd6f4',
-                fontSize: '1rem',
-              }}
-            >
-              🔄 Retake Photo
-            </button>
-          </div>
-        )}
+            {/* LIVE CAMERA MODE */}
+            {captureMode === 'camera' && (
+              <div className="viewfinder-container">
+                {/* Live Video Element */}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`viewfinder-video ${facingMode === 'user' ? 'mirror' : ''}`}
+                  style={{ display: isCameraActive ? 'block' : 'none' }}
+                />
 
-        {/* STATE: 'success' */}
-        {questState === 'success' && (
-          <div className="verify-box verify-box-success">
-            <div style={{ fontWeight: 'bold', fontSize: '1.05rem', marginBottom: '6px' }}>
-              ✅ Quest Proof Verified!
-            </div>
-            <div style={{ fontSize: '0.9rem' }}>
-              {verificationResult?.reason || `Successfully identified "${effectiveTarget}"!`}
-            </div>
-            {verificationResult?.confidence && (
-              <div style={{ fontSize: '0.82rem', marginTop: '4px', opacity: 0.9 }}>
-                AI Confidence: {Math.round(verificationResult.confidence * 100)}%
+                {/* Reticle / Framing Overlay */}
+                {isCameraActive && (
+                  <div className="viewfinder-overlay">
+                    <div className="reticle-corner top-left" />
+                    <div className="reticle-corner top-right" />
+                    <div className="reticle-corner bottom-left" />
+                    <div className="reticle-corner bottom-right" />
+                    <div className="reticle-center-badge">
+                      <span>🎯 Center "{effectiveTarget}" in frame</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Camera Inactive / Error Display */}
+                {!isCameraActive && (
+                  <div className="viewfinder-placeholder">
+                    {cameraError ? (
+                      <div className="camera-error-wrap">
+                        <div style={{ fontSize: '1.8rem', marginBottom: '6px' }}>⚠️</div>
+                        <p>{cameraError}</p>
+                        <button
+                          type="button"
+                          className="mobile-btn mobile-btn-blue"
+                          style={{ minHeight: '40px', marginTop: '8px' }}
+                          onClick={() => startCameraStream()}
+                        >
+                          🔄 Retry Camera Permission
+                        </button>
+                        <button
+                          type="button"
+                          className="mobile-btn mobile-btn-subtle"
+                          style={{ minHeight: '38px', marginTop: '6px' }}
+                          onClick={() => setCaptureMode('upload')}
+                        >
+                          📁 Switch to File Upload Instead
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="camera-start-wrap">
+                        <div style={{ fontSize: '2.4rem', marginBottom: '8px' }}>📷</div>
+                        <p>Live camera viewfinder is ready</p>
+                        <button
+                          type="button"
+                          className="mobile-btn mobile-btn-blue"
+                          onClick={() => startCameraStream()}
+                          style={{ maxWidth: '240px' }}
+                        >
+                          Start Live Camera
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Camera Viewfinder Controls */}
+                {isCameraActive && (
+                  <div className="viewfinder-controls">
+                    <button
+                      type="button"
+                      className="camera-ctrl-btn"
+                      onClick={toggleCameraFacing}
+                      title="Flip Camera"
+                    >
+                      🔄 Flip
+                    </button>
+
+                    <button
+                      type="button"
+                      className="shutter-btn"
+                      onClick={captureSnapshot}
+                      title="Capture Photo"
+                    >
+                      <div className="shutter-inner" />
+                    </button>
+
+                    <button
+                      type="button"
+                      className="camera-ctrl-btn"
+                      onClick={() => setCaptureMode('upload')}
+                      title="Switch to File Upload"
+                    >
+                      📁 Upload
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+            {/* UPLOAD / GALLERY MODE */}
+            {captureMode === 'upload' && (
+              <div className="upload-container">
+                <button
+                  type="button"
+                  className="photo-capture-box"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={disabled}
+                >
+                  <div style={{ fontSize: '2.2rem', marginBottom: '8px' }}>📸</div>
+                  <span style={{ fontSize: '1.05rem', fontWeight: 'bold' }}>
+                    Click to Choose or Snap Photo
+                  </span>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-sub)', marginTop: '4px' }}>
+                    Capture "{effectiveTarget}" with your device camera or upload image file
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {/* Hidden Input for Upload Mode */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handlePhotoFileSelected}
+              style={{ display: 'none' }}
+            />
+          </div>
+        )}
+
+        {/* ================= STATE: 'analyzing' ================= */}
+        {questState === 'analyzing' && (
+          <div className="analyzing-card">
+            {proof && (
+              <div className="photo-preview-wrap analyzing-preview">
+                <img src={proof} alt="Analyzing preview" className="photo-preview-img" />
+                <div className="scanning-laser-line" />
+              </div>
+            )}
+            <div className="analyzing-banner">
+              <div className="analyzing-spinner" />
+              <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: 'var(--accent-blue)' }}>
+                🤖 Analyzing photo with DETR Vision AI...
+              </div>
+              <div style={{ fontSize: '0.88rem', color: 'var(--text-sub)', marginTop: '4px' }}>
+                Scanning objects for target: <strong>"{effectiveTarget}"</strong> (&gt; 50% confidence required)
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= STATE: 'rejected' ================= */}
+        {questState === 'rejected' && (
+          <div className="rejected-flow-wrap">
+            {proof && (
+              <div className="photo-preview-wrap error-preview">
+                <img src={proof} alt="Rejected quest photo" className="photo-preview-img" />
+              </div>
+            )}
+
+            <div className="verify-box verify-box-error">
+              <div style={{ fontWeight: 'bold', fontSize: '1.1rem', marginBottom: '6px' }}>
+                ❌ That doesn't look like a {effectiveTarget}!
+              </div>
+              <p style={{ margin: '0 0 10px 0', fontSize: '0.92rem', lineHeight: '1.45' }}>
+                {errorMessage || `Could not detect a distinct ${effectiveTarget} with sufficient AI confidence.`}
+              </p>
+              <div style={{ fontSize: '0.84rem', color: 'var(--text-main)', opacity: 0.9 }}>
+                💡 <em>Tip: Position camera closer, keep steady, and ensure bright outdoor lighting.</em>
+              </div>
+
               <button
                 type="button"
                 onClick={handleRetake}
                 className="mobile-btn"
                 style={{
-                  background: 'transparent',
-                  border: '1px solid var(--accent-green)',
-                  color: 'var(--accent-green)',
-                  flex: 1,
-                  fontSize: '0.9rem',
+                  marginTop: '14px',
+                  background: '#45475a',
+                  color: '#cdd6f4',
+                  fontSize: '1rem',
                 }}
               >
-                🔄 Retake
+                🔄 Retake Photo
               </button>
             </div>
           </div>
         )}
 
-        {/* 2. STRICT BUTTON GATING:
-            The "Submit & Claim Points" button MUST NOT render if the state is anything other than 'success'.
-            Notice: No disabled button, no hidden hack - it literally only mounts when questState === 'success'.
-        */}
+        {/* ================= STATE: 'success' ================= */}
         {questState === 'success' && (
-          <button
-            type="button"
-            onClick={handleSubmit}
-            className="mobile-btn mobile-btn-green"
-            style={{
-              fontSize: '1.05rem',
-              minHeight: '52px',
-              marginTop: '4px',
-            }}
-          >
-            ✨ Submit & Claim Points (+10 Points)
-          </button>
+          <div className="success-flow-wrap">
+            {proof && (
+              <div className="photo-preview-wrap success-preview">
+                <img src={proof} alt="Verified quest photo" className="photo-preview-img" />
+              </div>
+            )}
+
+            <div className="verify-box verify-box-success">
+              <div style={{ fontWeight: 'bold', fontSize: '1.15rem', marginBottom: '6px' }}>
+                🎉 Quest Proof Verified!
+              </div>
+              <p style={{ margin: '0 0 6px 0', fontSize: '0.94rem' }}>
+                {verificationResult?.reason || `Distinct "${effectiveTarget}" successfully identified!`}
+              </p>
+              {verificationResult?.confidence && (
+                <div style={{ fontSize: '0.84rem', opacity: 0.9 }}>
+                  AI Confidence: <strong>{Math.round(verificationResult.confidence * 100)}%</strong>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                <button
+                  type="button"
+                  onClick={handleRetake}
+                  className="mobile-btn"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--accent-green)',
+                    color: 'var(--accent-green)',
+                    fontSize: '0.92rem',
+                    minHeight: '40px',
+                  }}
+                >
+                  🔄 Retake
+                </button>
+              </div>
+            </div>
+
+            {/* STRICT BUTTON GATING: Rendered ONLY when state is 'success' */}
+            <button
+              type="button"
+              onClick={handleSubmit}
+              className="mobile-btn mobile-btn-green"
+              style={{
+                fontSize: '1.1rem',
+                minHeight: '54px',
+                marginTop: '10px',
+              }}
+            >
+              ✨ Submit & Claim Points (+10 Points)
+            </button>
+          </div>
         )}
       </div>
     </div>
   );
 };
 
-// Also export as CameraCapture for maximum naming compatibility
 export const CameraCapture = QuestView;
 export default QuestView;
-
