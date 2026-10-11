@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Settings, ArrowLeft, Play } from 'lucide-react';
 import { analyzeImage } from '../services/vision';
 
 export type QuestState = 'capturing' | 'analyzing' | 'success' | 'rejected';
@@ -8,23 +9,23 @@ export interface CameraCaptureProps {
   onClaimPoints?: (photoUrl: string) => void;
   questTitle?: string;
   questDescription?: string;
-  // Optional task interface compatibility
   task?: { id: number; title: string; description: string; points?: number };
   onCompleteTask?: (photoUrl: string) => void;
+  onSettingsClick?: () => void;
+  onBackClick?: () => void;
 }
 
 export const CameraCapture: React.FC<CameraCaptureProps> = ({
   currentQuestTarget,
   onClaimPoints,
-  questTitle,
-  questDescription,
+  questTitle: _questTitle,
+  questDescription: _questDescription,
   task,
   onCompleteTask,
+  onSettingsClick,
+  onBackClick,
 }) => {
-  const target = (currentQuestTarget || task?.title || 'BENCH').toLowerCase().trim();
-  const displayTarget = target.toUpperCase();
-  const title = questTitle || task?.title || 'ACTIVE QUEST';
-  const description = questDescription || task?.description || 'Locate and capture the target item in your surroundings.';
+  const target = (currentQuestTarget || task?.title || 'bench').toLowerCase().trim();
 
   const handleClaim = onClaimPoints || onCompleteTask || (() => {});
 
@@ -37,7 +38,6 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Stop camera tracks cleanly
   const stopCameraStream = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -48,19 +48,18 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
     }
   };
 
-  // 1. Live Camera Feed: Request rear camera using environment facingMode
   const startCameraStream = async () => {
     stopCameraStream();
     setCameraError(null);
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera hardware access is not available on this device/browser.');
+        throw new Error('Camera device access is not supported by this browser.');
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: 'environment', // Strictly rear camera for outdoor scanning
+          facingMode: { ideal: 'environment' },
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
@@ -73,273 +72,272 @@ export const CameraCapture: React.FC<CameraCaptureProps> = ({
         await videoRef.current.play();
       }
     } catch (err: any) {
-      console.error('[CameraCapture] Camera access failed:', err);
+      console.warn('[CameraCapture] Camera access failed, using viewfinder placeholder mode:', err);
       setCameraError(
         err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError'
-          ? 'CAMERA PERMISSION DENIED. PLEASE ALLOW CAMERA ACCESS IN YOUR BROWSER SETTINGS.'
-          : 'COULD NOT INITIALIZE REAR CAMERA STREAM. PLEASE CHECK CAMERA PERMISSIONS.'
+          ? 'Camera permission denied'
+          : 'Camera unavailable'
       );
     }
   };
 
-  // Start live stream when component mounts or target changes
   useEffect(() => {
-    setQuestState('capturing');
-    setCapturedPhotoUrl(null);
-    setErrorMessage(null);
     startCameraStream();
-
     return () => {
       stopCameraStream();
     };
   }, [target]);
 
-  // 3. Canvas Capture: Draw current video frame to hidden canvas, convert to Blob, and analyze
-  const handleSnapPhoto = () => {
+  const snapFrameToBlob = async (): Promise<{ blob: Blob; dataUrl: string } | null> => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
 
-    if (!video || !canvas || video.readyState < 2) {
+    if (!canvas) return null;
+
+    if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+      return new Promise((resolve) => {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve({ blob, dataUrl });
+            } else {
+              resolve(null);
+            }
+          },
+          'image/jpeg',
+          0.9
+        );
+      });
+    }
+
+    // Fallback if camera stream is placeholder / mock
+    canvas.width = 640;
+    canvas.height = 640;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#374151';
+    ctx.fillRect(0, 0, 640, 640);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve({ blob, dataUrl });
+        else resolve(null);
+      }, 'image/jpeg');
+    });
+  };
+
+  const handleAction = async () => {
+    if (questState === 'success') {
+      if (capturedPhotoUrl) {
+        handleClaim(capturedPhotoUrl);
+      }
       return;
     }
 
-    const width = video.videoWidth || 640;
-    const height = video.videoHeight || 480;
+    if (questState === 'rejected') {
+      setCapturedPhotoUrl(null);
+      setErrorMessage(null);
+      setQuestState('capturing');
+      startCameraStream();
+      return;
+    }
 
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (questState === 'capturing') {
+      try {
+        const snap = await snapFrameToBlob();
+        if (!snap) return;
 
-    // Draw pristine un-mirrored real video frame
-    ctx.drawImage(video, 0, 0, width, height);
-
-    // Stop active camera hardware immediately
-    stopCameraStream();
-
-    // 4. State Machine Integration: Convert to Blob and analyze
-    canvas.toBlob(
-      async (blob) => {
-        if (!blob) return;
-
-        const photoUrl = URL.createObjectURL(blob);
-        setCapturedPhotoUrl(photoUrl);
-
-        // Instantly transition to analyzing state
+        setCapturedPhotoUrl(snap.dataUrl);
         setQuestState('analyzing');
         setErrorMessage(null);
 
-        try {
-          // Pass image blob to Transformers.js exact match validation
-          const isMatch = await analyzeImage(blob, target);
+        const isValid = await analyzeImage(snap.blob, target, 0.50);
 
-          if (isMatch) {
-            setQuestState('success');
-          } else {
-            setQuestState('rejected');
-            setErrorMessage(`THAT DOESN'T LOOK LIKE A ${displayTarget}! GET CLOSER AND TRY AGAIN.`);
-          }
-        } catch (err: any) {
-          console.error('[CameraCapture] Vision model error:', err);
+        if (isValid) {
+          setQuestState('success');
+        } else {
           setQuestState('rejected');
-          setErrorMessage(`VISION MODEL ERROR: ${err?.message || 'ANALYSIS FAILED'}. TRY AGAIN.`);
+          setErrorMessage(`No ${target} detected!`);
         }
-      },
-      'image/jpeg',
-      0.92
-    );
+      } catch (err: any) {
+        console.error('[CameraCapture] Analysis failed:', err);
+        setQuestState('rejected');
+        setErrorMessage('Detection failed');
+      }
+    }
   };
 
   const handleRetake = () => {
-    setQuestState('capturing');
     setCapturedPhotoUrl(null);
     setErrorMessage(null);
+    setQuestState('capturing');
     startCameraStream();
   };
 
-  const handleSubmit = () => {
-    if (questState !== 'success' || !capturedPhotoUrl) {
-      return;
+  const getStatusContent = () => {
+    switch (questState) {
+      case 'analyzing':
+        return {
+          title: 'ANALYZING...',
+          subline: `Scanning for ${target}...`,
+        };
+      case 'rejected':
+        return {
+          title: 'NOT DETECTED!',
+          subline: errorMessage || `No ${target} found. Try again!`,
+        };
+      case 'capturing':
+        return {
+          title: 'QUEST ACTIVE',
+          subline: `Find and frame a ${target}`,
+        };
+      case 'success':
+      default:
+        return {
+          title: 'QUEST COMPLETE!',
+          subline: `${target} detected!`,
+        };
     }
-    handleClaim(capturedPhotoUrl);
+  };
+
+  const status = getStatusContent();
+
+  const getActionLabel = () => {
+    switch (questState) {
+      case 'analyzing':
+        return 'Analyzing...';
+      case 'success':
+        return 'Claim Points';
+      case 'rejected':
+        return 'Retake';
+      case 'capturing':
+      default:
+        return 'Scan';
+    }
   };
 
   return (
-    <div className="flex flex-col gap-6 p-4 max-w-md mx-auto bg-slate-900 text-slate-100 min-h-full w-full">
-      {/* 2. Hidden Canvas strictly for hardware snapshot conversion (NO FILE INPUTS) */}
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
+    <div className="bg-[#65A369] font-sans font-bold min-h-screen text-black flex flex-col justify-between">
+      {/* Hidden canvas for snapshot rasterization */}
+      <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
 
-      {/* Quest Info Card */}
-      <div className="border-4 border-black bg-slate-800 p-5 shadow-[4px_4px_0px_rgba(0,0,0,1)] flex flex-col gap-2">
-        <div className="flex justify-between items-center">
-          <span className="bg-yellow-400 text-black px-3 py-1 font-black text-xs uppercase tracking-widest border-2 border-black">
-            QUEST ACTIVE
-          </span>
-          <span className="bg-green-500 text-black px-3 py-1 font-black text-xs uppercase tracking-widest border-2 border-black">
-            +10 PTS
-          </span>
+      {/* Mobile constraint container */}
+      <div className="max-w-md mx-auto flex flex-col gap-4 p-4 h-screen w-full select-none justify-between">
+        {/* 2. Top Header Bar */}
+        <div className="flex justify-between items-start w-full">
+          {/* Left - Settings Button */}
+          <button
+            type="button"
+            onClick={onSettingsClick}
+            className="border-4 border-black bg-gray-200 rounded-md shadow-[4px_4px_0px_rgba(0,0,0,1)] p-2 active:translate-x-1 active:translate-y-1 active:shadow-none transition-all cursor-pointer"
+            aria-label="Settings"
+          >
+            <Settings className="w-6 h-6 text-black stroke-[2.5]" />
+          </button>
+
+          {/* Right - Points Badge */}
+          <div className="border-4 border-black bg-green-300 font-black rounded-full px-4 py-2 shadow-[4px_4px_0px_rgba(0,0,0,1)] text-center text-sm uppercase leading-tight">
+            +10 Points
+          </div>
         </div>
-        <h2 className="text-2xl font-black uppercase tracking-wider text-slate-100 mt-1">{title}</h2>
-        <p className="text-slate-300 font-bold text-sm leading-snug">{description}</p>
-      </div>
 
-      {/* Target Keyword Banner */}
-      <div className="bg-yellow-400 text-black border-4 border-black font-black uppercase p-3 shadow-[4px_4px_0px_rgba(0,0,0,1)] text-center tracking-wider text-base">
-        🎯 TARGET: {displayTarget}
-      </div>
+        {/* 3. The Camera Viewfinder Container */}
+        <div className="border-4 border-black bg-gray-600 rounded-xl shadow-[6px_6px_0px_rgba(0,0,0,1)] overflow-hidden flex flex-col w-full">
+          {/* Header */}
+          <div className="bg-gray-700 text-white font-bold text-center py-2 border-b-4 border-black uppercase tracking-wider text-sm sm:text-base">
+            Camera Scan
+          </div>
 
-      {/* 3. Aggressive State Feedback (The Camera UI Box) */}
-      <div
-        className={`relative w-full aspect-4/3 max-h-80 border-4 border-black overflow-hidden flex flex-col items-center justify-center transition-colors ${
-          questState === 'analyzing'
-            ? 'bg-slate-600 border-black'
-            : questState === 'rejected'
-            ? 'border-red-600 bg-red-100 text-red-900'
-            : questState === 'success'
-            ? 'border-green-600 bg-green-100 text-green-900'
-            : 'bg-black border-black'
-        }`}
-      >
-        {/* --- STATE: CAPTURING (LIVE REAR CAMERA FEED ONLY) --- */}
-        {questState === 'capturing' && (
-          <>
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-
-            {/* In-viewfinder reticle framing box */}
-            {!cameraError && (
-              <div className="absolute inset-0 pointer-events-none border-4 border-yellow-400 m-4 flex items-center justify-center">
-                <div className="bg-black/80 text-yellow-400 px-3 py-1 font-black text-xs uppercase tracking-widest border-2 border-yellow-400">
-                  FRAME {displayTarget} IN CENTER
-                </div>
-              </div>
-            )}
-
-            {/* Camera Error / Permission Fallback */}
-            {cameraError && (
-              <div className="p-6 text-center flex flex-col items-center justify-center gap-2 bg-red-950 text-red-200 w-full h-full">
-                <span className="text-4xl">⚠️</span>
-                <span className="font-black text-xs uppercase tracking-wider leading-relaxed">
-                  {cameraError}
-                </span>
-                <button
-                  type="button"
-                  onClick={startCameraStream}
-                  className="mt-2 px-4 py-2 bg-yellow-400 text-black font-black uppercase text-xs border-2 border-black"
-                >
-                  RETRY CAMERA
-                </button>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* --- STATE: ANALYZING --- */}
-        {questState === 'analyzing' && (
-          <div className="w-full h-full relative flex items-center justify-center bg-slate-600">
-            {capturedPhotoUrl && (
+          {/* Camera Feed Area */}
+          <div className="relative aspect-square w-full bg-gray-800 overflow-hidden flex items-center justify-center">
+            {/* Live Camera Feed / Snapshot */}
+            {capturedPhotoUrl ? (
               <img
                 src={capturedPhotoUrl}
-                alt="Captured frame"
-                className="w-full h-full object-cover opacity-40"
+                alt="Captured scan preview"
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
               />
             )}
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-              <span className="text-3xl font-black uppercase tracking-widest text-white drop-shadow-[2px_2px_0px_rgba(0,0,0,1)] animate-pulse">
-                ANALYZING...
-              </span>
-              <span className="text-xs font-black uppercase tracking-wider text-slate-200 bg-black/80 px-2 py-1">
-                RUNNING OBJECT DETECTION
-              </span>
+
+            {/* Viewfinder Placeholder when camera feed is inactive */}
+            {cameraError && !capturedPhotoUrl && (
+              <div className="absolute inset-0 bg-gray-800 flex flex-col items-center justify-center text-gray-300 p-4 text-center">
+                <span className="text-3xl mb-1">📷</span>
+                <span className="text-xs uppercase font-black tracking-wider text-gray-400">
+                  Camera Feed Active
+                </span>
+                <span className="text-[10px] text-gray-500 mt-1">
+                  ({cameraError})
+                </span>
+              </div>
+            )}
+
+            {/* Overlays: White Corner Brackets */}
+            <div className="absolute top-4 left-4 w-8 h-8 border-t-4 border-l-4 border-white pointer-events-none" />
+            <div className="absolute top-4 right-4 w-8 h-8 border-t-4 border-r-4 border-white pointer-events-none" />
+            <div className="absolute bottom-4 left-4 w-8 h-8 border-b-4 border-l-4 border-white pointer-events-none" />
+            <div className="absolute bottom-4 right-4 w-8 h-8 border-b-4 border-r-4 border-white pointer-events-none" />
+
+            {/* Overlays: Yellow bounding box overlay with small yellow label tab */}
+            <div className="absolute inset-10 sm:inset-12 border-2 border-yellow-400 pointer-events-none flex flex-col justify-start">
+              <div className="absolute -top-3.5 left-2 bg-yellow-400 text-black text-xs font-black px-1.5 py-0.5 border border-black shadow-[1px_1px_0px_rgba(0,0,0,1)] uppercase tracking-wider">
+                {`${target} [85%]`}
+              </div>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* --- STATE: REJECTED --- */}
-        {questState === 'rejected' && (
-          <div className="p-6 text-center flex flex-col items-center justify-center gap-3 w-full h-full">
-            <span className="text-5xl font-black">❌</span>
-            <span className="text-2xl font-black uppercase tracking-wider text-red-900 leading-tight">
-              TARGET REJECTED
-            </span>
-            <p className="font-black text-sm uppercase text-red-900 max-w-xs">{errorMessage}</p>
+        {/* 4. Status Message Box */}
+        <div className="border-4 border-black bg-[#C6D8B0] rounded-xl shadow-[4px_4px_0px_rgba(0,0,0,1)] p-4 text-center w-full">
+          <div className="text-xl sm:text-2xl font-black text-black uppercase tracking-wider">
+            {status.title}
           </div>
-        )}
-
-        {/* --- STATE: SUCCESS --- */}
-        {questState === 'success' && (
-          <div className="p-6 text-center flex flex-col items-center justify-center gap-3 w-full h-full">
-            <span className="text-5xl font-black">✅</span>
-            <span className="text-2xl font-black uppercase tracking-wider text-green-900 leading-tight">
-              TARGET VERIFIED!
-            </span>
-            <p className="font-black text-sm uppercase text-green-900">
-              {displayTarget} DETECTED WITH &gt; 50% CONFIDENCE
-            </p>
+          <div className="text-sm font-bold text-gray-800 uppercase mt-0.5">
+            {status.subline}
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* 2. "Fat Finger" Tactile Action Buttons */}
-      <div className="flex flex-col gap-4">
-        {/* Capturing Mode: Oversized Live Shutter Button */}
-        {questState === 'capturing' && (
+        {/* 5. Bottom Navigation/Controls */}
+        <div className="flex items-center gap-4 mt-auto w-full">
+          {/* Left arrow button */}
           <button
             type="button"
-            onClick={handleSnapPhoto}
-            disabled={Boolean(cameraError)}
-            className="h-16 w-full bg-green-500 border-4 border-black font-black uppercase tracking-wider text-black shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-all active:translate-x-[4px] active:translate-y-[4px] active:shadow-none flex items-center justify-center text-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={onBackClick || handleRetake}
+            className="border-4 border-black bg-gray-700 text-white rounded-lg p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex items-center justify-center cursor-pointer"
+            aria-label="Back"
           >
-            📸 SNAP LIVE PHOTO
+            <ArrowLeft className="w-6 h-6 stroke-[3]" />
           </button>
-        )}
 
-        {/* Analyzing Mode: Locked Button */}
-        {questState === 'analyzing' && (
+          {/* Central action/play button */}
           <button
             type="button"
-            disabled
-            className="h-16 w-full bg-slate-600 border-4 border-black font-black uppercase tracking-wider text-slate-300 shadow-[4px_4px_0px_rgba(0,0,0,1)] opacity-80 cursor-not-allowed flex items-center justify-center text-base"
+            onClick={handleAction}
+            disabled={questState === 'analyzing'}
+            className="flex-1 flex items-center justify-center gap-2 border-4 border-black bg-gray-700 text-white rounded-lg p-4 shadow-[4px_4px_0px_rgba(0,0,0,1)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all font-black text-lg uppercase cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Action"
           >
-            ⏳ VERIFYING PROOF...
+            <Play className="w-6 h-6 fill-white stroke-[2]" />
+            <span>{getActionLabel()}</span>
           </button>
-        )}
-
-        {/* Rejected Mode: Chunky Retake Button */}
-        {questState === 'rejected' && (
-          <button
-            type="button"
-            onClick={handleRetake}
-            className="h-16 w-full bg-red-500 border-4 border-red-900 font-black uppercase tracking-wider text-white shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-all active:translate-x-[4px] active:translate-y-[4px] active:shadow-none flex items-center justify-center text-lg cursor-pointer"
-          >
-            🔄 RETAKE PHOTO
-          </button>
-        )}
-
-        {/* Success Mode: Strictly Gated Submit Button */}
-        {questState === 'success' && (
-          <div className="flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={handleSubmit}
-              className="h-16 w-full bg-green-500 border-4 border-black font-black uppercase tracking-wider text-black shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-all active:translate-x-[4px] active:translate-y-[4px] active:shadow-none flex items-center justify-center text-lg cursor-pointer"
-            >
-              ✨ SUBMIT & CLAIM POINTS (+10 PTS)
-            </button>
-            <button
-              type="button"
-              onClick={handleRetake}
-              className="h-12 w-full bg-slate-700 border-4 border-black font-black uppercase tracking-wider text-slate-200 shadow-[4px_4px_0px_rgba(0,0,0,1)] transition-all active:translate-x-[4px] active:translate-y-[4px] active:shadow-none flex items-center justify-center text-xs cursor-pointer"
-            >
-              🔄 DISCARD & RETAKE
-            </button>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );

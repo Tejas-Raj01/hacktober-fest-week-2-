@@ -64,3 +64,4 @@ export const QUESTS: Quest[] = [
 ];
 
 export default QUESTS;
+
