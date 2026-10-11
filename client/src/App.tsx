@@ -24,17 +24,12 @@ function App() {
   const [, setUserScore] = useState(0);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
-  const [serverUrl, setServerUrl] = useState<string>(() => {
-    return (
-      localStorage.getItem('oq_server_url') ||
-      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? 'ws://localhost:8080/ws'
-        : 'wss://hacktober-fest-week-2-7n52.onrender.com/ws')
-    );
-  });
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>(
-    'connecting'
-  );
+  const serverUrl =
+    localStorage.getItem('oq_server_url') ||
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? 'ws://localhost:8080/ws'
+      : 'wss://hacktober-fest-week-2-7n52.onrender.com/ws');
+
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
   const [wsReady, setWsReady] = useState(false);
@@ -47,7 +42,6 @@ function App() {
         wsRef.current.close();
       } catch (e) {}
     }
-    setConnectionStatus('connecting');
     setWsReady(false);
     setLobbyError(null);
 
@@ -55,25 +49,21 @@ function App() {
     try {
       socket = new WebSocket(targetUrl);
     } catch (err: any) {
-      setConnectionStatus('error');
       setLobbyError(`Failed to connect to ${targetUrl}: ${err?.message || err}`);
       return;
     }
 
     socket.onopen = () => {
       setWsReady(true);
-      setConnectionStatus('connected');
       setLobbyError(null);
     };
 
     socket.onclose = () => {
       setWsReady(false);
-      setConnectionStatus('disconnected');
     };
 
     socket.onerror = () => {
       setWsReady(false);
-      setConnectionStatus('error');
     };
 
     socket.onmessage = (event) => {
@@ -126,10 +116,6 @@ function App() {
     };
   }, [serverUrl]);
 
-  const switchServerUrl = (newUrl: string) => {
-    localStorage.setItem('oq_server_url', newUrl);
-    setServerUrl(newUrl);
-  };
 
   const createGame = () => {
     setLobbyError(null);
@@ -202,7 +188,26 @@ function App() {
   };
 
   const leaveGame = () => {
-    window.location.reload();
+    const isMultiplayer = Boolean(gameState);
+    const confirmMsg = isMultiplayer
+      ? 'Are you sure you want to leave this game room? Your expedition progress will be reset.'
+      : 'Are you sure you want to exit the scanner and return to the main lobby?';
+
+    if (window.confirm(confirmMsg)) {
+      setGameState(null);
+      setPlayerId('');
+      setRoomCode('');
+      setDisplayedLore(null);
+      setLobbyError(null);
+      setQuestIndex(0);
+      setUserScore(0);
+      setShowSettingsModal(false);
+      setCurrentView('lobby');
+      connectWs(serverUrl);
+      if (window.location.search || window.location.hash) {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    }
   };
 
   // ================= 1. ACTIVE CAMERA SCANNER VIEW =================
@@ -225,6 +230,8 @@ function App() {
         <QuestScanner
           targetKeyword={activeQuest.targetKeyword}
           points={activeQuest.points}
+          roomCode={gameState?.room_code}
+          isMultiplayer={Boolean(isMultiplayerActive)}
           onSuccess={(proofUrl) => {
             setUserScore((s) => s + activeQuest.points);
             if (isMultiplayerActive) {
@@ -242,6 +249,7 @@ function App() {
           onSettings={() => {
             setShowSettingsModal(true);
           }}
+          onLeave={leaveGame}
         />
 
         {/* In-Game Settings Modal */}
@@ -262,28 +270,30 @@ function App() {
               <div className="bg-white border-4 border-black p-3 shadow-brutal flex flex-col gap-1 rounded-xl">
                 <span className="text-xs uppercase font-black text-gray-500">Active Quest Target</span>
                 <span className="text-lg font-black uppercase text-green-700">
-                  {QUESTS[questIndex % QUESTS.length].title} ({activeQuest.targetKeyword})
+                  {isMultiplayerActive
+                    ? `Quest #${(gameState?.current_task_index || 0) + 1} (${activeQuest.targetKeyword})`
+                    : `${QUESTS[questIndex % QUESTS.length].title} (${activeQuest.targetKeyword})`}
                 </span>
                 <span className="text-xs text-gray-700 font-bold">
-                  {QUESTS[questIndex % QUESTS.length].description}
+                  {isMultiplayerActive
+                    ? gameState?.tasks?.[gameState.current_task_index || 0]?.description || ''
+                    : QUESTS[questIndex % QUESTS.length].description}
                 </span>
               </div>
 
+              {/* Leave Current Game Action Button */}
               <button
                 type="button"
-                onClick={() => {
-                  setShowSettingsModal(false);
-                  setCurrentView('lobby');
-                }}
-                className="w-full bg-[#A3E681] border-4 border-black font-black uppercase py-3 rounded-xl shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none cursor-pointer"
+                onClick={leaveGame}
+                className="w-full bg-red-400 hover:bg-red-300 text-black border-4 border-black font-black uppercase py-3 rounded-xl shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none cursor-pointer flex items-center justify-center gap-2"
               >
-                🏕️ Return to Game Lobby
+                🚪 {gameState ? `Leave Game Room (${gameState.room_code})` : 'Exit to Main Lobby'}
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowSettingsModal(false)}
-                className="w-full bg-gray-200 border-4 border-black font-black uppercase py-3 rounded-xl shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none cursor-pointer"
+                className="w-full bg-gray-200 hover:bg-gray-100 border-4 border-black font-black uppercase py-3 rounded-xl shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none cursor-pointer"
               >
                 Resume Camera Scan
               </button>
@@ -306,13 +316,14 @@ function App() {
           <div className="flex justify-between items-center w-full">
             <button
               onClick={leaveGame}
-              className="bg-red-400 text-black font-black border-4 border-black px-4 py-2 rounded-lg shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none uppercase text-sm cursor-pointer"
+              className="bg-red-400 hover:bg-red-300 text-black font-black border-4 border-black px-4 py-2 rounded-lg shadow-brutal active:translate-x-1 active:translate-y-1 active:shadow-none uppercase text-sm cursor-pointer"
             >
               🚪 Leave Room
             </button>
 
             <span className="bg-[#A3E681] border-4 border-black font-black rounded-full px-4 py-1.5 shadow-brutal text-sm uppercase">
               {gameState.status === 'Lobby' && '⏳ Waiting Lobby'}
+              {gameState.status === 'InProgress' && '⚔️ In Progress'}
               {gameState.status === 'Finished' && '🏆 Game Finished'}
             </span>
           </div>
@@ -359,6 +370,35 @@ function App() {
             </div>
           )}
 
+          {/* In-Progress Expedition Card */}
+          {gameState.status === 'InProgress' && (
+            <div className="bg-white border-4 border-black p-6 rounded-2xl shadow-brutal text-center flex flex-col items-center gap-4">
+              <span className="text-5xl">⚔️</span>
+              <h2 className="text-2xl font-black uppercase tracking-wider text-black">
+                Expedition In Progress
+              </h2>
+              <p className="text-gray-700 font-bold text-sm">
+                Quest #{((gameState.current_task_index || 0) + 1)}: <span className="text-green-700 font-black uppercase">{gameState.tasks?.[gameState.current_task_index || 0]?.title}</span>
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm justify-center">
+                <button
+                  type="button"
+                  onClick={() => setCurrentView('scanner')}
+                  className="flex-1 bg-yellow-400 text-black font-black border-4 border-black shadow-brutal hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_rgba(0,0,0,1)] p-3 rounded-xl text-base uppercase transition-all cursor-pointer"
+                >
+                  📸 Resume Scan
+                </button>
+                <button
+                  type="button"
+                  onClick={leaveGame}
+                  className="flex-1 bg-red-400 hover:bg-red-300 text-black font-black border-4 border-black shadow-brutal hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_rgba(0,0,0,1)] p-3 rounded-xl text-base uppercase transition-all cursor-pointer"
+                >
+                  🚪 Leave Game
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Finished Card */}
           {gameState.status === 'Finished' && (
             <div className="bg-white border-4 border-black p-6 rounded-2xl shadow-brutal text-center flex flex-col items-center gap-4">
@@ -373,7 +413,7 @@ function App() {
                 onClick={leaveGame}
                 className="w-full max-w-xs bg-[#86EFAC] text-black font-black border-4 border-black shadow-[4px_4px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[2px_2px_0px_rgba(0,0,0,1)] p-4 rounded-xl text-lg uppercase transition-all cursor-pointer"
               >
-                🌲 Return to Basecamp
+                🌲 Leave Game &amp; Return to Lobby
               </button>
             </div>
           )}
@@ -445,69 +485,6 @@ function App() {
           </p>
         </header>
 
-        {/* Server Backend Connection Bar */}
-        <div className="bg-white border-4 border-black p-4 rounded-2xl shadow-brutal flex flex-col gap-3 mb-6">
-          <div className="flex justify-between items-center flex-wrap gap-2">
-            <span className="font-black text-sm uppercase tracking-wide text-black">
-              Server Backend:
-            </span>
-            <div className="flex items-center gap-2">
-              <span
-                className={`w-3.5 h-3.5 rounded-full border-2 border-black ${
-                  connectionStatus === 'connected'
-                    ? 'bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]'
-                    : connectionStatus === 'connecting'
-                    ? 'bg-yellow-400 animate-ping'
-                    : 'bg-red-500'
-                }`}
-              />
-              <span className="font-black text-xs uppercase tracking-wider text-black">
-                {connectionStatus === 'connected' && '🟢 Connected'}
-                {connectionStatus === 'connecting' && '🟡 Connecting...'}
-                {connectionStatus === 'disconnected' && '🔴 Disconnected'}
-                {connectionStatus === 'error' && '❌ Connection Failed'}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => switchServerUrl('ws://localhost:8080/ws')}
-              className={`px-3 py-2 rounded-lg text-sm transition-all cursor-pointer ${
-                serverUrl.includes('localhost')
-                  ? 'bg-[#60A5FA] border-4 border-black font-black text-white shadow-brutal'
-                  : 'bg-gray-300 border-4 border-black rounded-lg text-black font-bold shadow-brutal hover:bg-gray-200'
-              }`}
-            >
-              Local (8080)
-            </button>
-            <button
-              type="button"
-              onClick={() => switchServerUrl('wss://hacktober-fest-week-2-7n52.onrender.com/ws')}
-              className={`px-3 py-2 rounded-lg text-sm transition-all cursor-pointer ${
-                serverUrl.includes('onrender.com')
-                  ? 'bg-[#60A5FA] border-4 border-black font-black text-white shadow-brutal'
-                  : 'bg-gray-300 border-4 border-black rounded-lg text-black font-bold shadow-brutal hover:bg-gray-200'
-              }`}
-            >
-              Cloud (Render)
-            </button>
-            <button
-              type="button"
-              onClick={() => connectWs(serverUrl)}
-              className="px-3 py-2 rounded-lg text-sm bg-gray-300 border-4 border-black rounded-lg text-black font-bold shadow-brutal hover:bg-gray-200 transition-all cursor-pointer"
-            >
-              🔄 Reconnect
-            </button>
-          </div>
-
-          {connectionStatus === 'connecting' && (
-            <p className="text-xs font-bold text-amber-800">
-              ⏳ Connecting to server... (Render cloud spin-up takes ~30s on cold start)
-            </p>
-          )}
-        </div>
 
         {/* Lobby Error Alert */}
         {lobbyError && (

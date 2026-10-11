@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Settings, ArrowLeft, ArrowRight, SwitchCamera } from 'lucide-react';
+import { Settings, ArrowLeft, ArrowRight, SwitchCamera, LogOut } from 'lucide-react';
 import { validateQuestPhoto, type BoundingBox } from '../services/vision';
 
 export type QuestState = 'capturing' | 'analyzing' | 'success' | 'rejected';
@@ -7,11 +7,14 @@ export type QuestState = 'capturing' | 'analyzing' | 'success' | 'rejected';
 export interface QuestScannerProps {
   targetKeyword?: string;
   points?: number;
+  roomCode?: string;
+  isMultiplayer?: boolean;
   onSuccess?: (photoUrl: string) => void;
   onBack?: () => void;
   onNext?: () => void;
   onSettings?: () => void;
   onClaim?: (photoUrl: string) => void;
+  onLeave?: () => void;
 }
 
 interface BoxCoords {
@@ -46,11 +49,14 @@ function calculateBoxPercentages(
 export const QuestScanner: React.FC<QuestScannerProps> = ({
   targetKeyword = 'bench',
   points = 10,
+  roomCode,
+  isMultiplayer,
   onSuccess,
   onBack,
   onNext,
   onSettings,
   onClaim,
+  onLeave,
 }) => {
   const [questState, setQuestState] = useState<QuestState>('capturing');
   const [capturedPhotoUrl, setCapturedPhotoUrl] = useState<string | null>(null);
@@ -237,20 +243,47 @@ export const QuestScanner: React.FC<QuestScannerProps> = ({
       {/* Main Responsive Mobile / Tablet Widescreen Centered Frame */}
       <div className="max-w-xl mx-auto min-h-screen flex flex-col gap-4 p-4 font-sans justify-between border-r-4 border-l-4 border-black bg-[#A3E681]/30 backdrop-blur-sm shadow-brutal">
         {/* 1. Top Header */}
-        <div className="flex justify-between items-start w-full">
-          {/* Left: Square settings button */}
-          <button
-            type="button"
-            onClick={onSettings}
-            className="bg-gray-300 border-4 border-black rounded-md shadow-brutal p-2 active:translate-x-1 active:translate-y-1 active:shadow-none transition-all cursor-pointer"
-            aria-label="Settings"
-          >
-            <Settings className="w-6 h-6 text-black stroke-[2.5]" />
-          </button>
+        <div className="flex justify-between items-center w-full">
+          {/* Left: Square settings button and Leave button */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onSettings}
+              className="bg-gray-300 border-4 border-black rounded-md shadow-brutal p-2 active:translate-x-1 active:translate-y-1 active:shadow-none transition-all cursor-pointer"
+              aria-label="Settings"
+            >
+              <Settings className="w-6 h-6 text-black stroke-[2.5]" />
+            </button>
 
-          {/* Right: +10 Points badge */}
-          <div className="bg-[#A3E681] border-4 border-black font-black rounded-full px-4 py-2 shadow-brutal text-center text-sm uppercase leading-tight">
-            +{points} Points
+            {onLeave && (
+              <button
+                type="button"
+                onClick={onLeave}
+                className="bg-red-400 hover:bg-red-300 text-black border-4 border-black rounded-md shadow-brutal px-3 py-2 font-black uppercase text-xs sm:text-sm active:translate-x-1 active:translate-y-1 active:shadow-none transition-all cursor-pointer flex items-center gap-1.5"
+                title="Leave current game"
+                aria-label="Leave current game"
+              >
+                <LogOut className="w-5 h-5 text-black stroke-[2.5]" />
+                <span className="hidden xs:inline">Leave</span>
+              </button>
+            )}
+          </div>
+
+          {/* Right: Optional Room Tag & Points badge */}
+          <div className="flex items-center gap-2">
+            {isMultiplayer && (
+              <span className="bg-black text-yellow-300 border-2 border-black font-black rounded-md px-2 py-1 text-xs uppercase shadow-[2px_2px_0px_rgba(0,0,0,1)] tracking-wider hidden sm:inline-block">
+                Multiplayer
+              </span>
+            )}
+            {roomCode && (
+              <div className="bg-white border-2 border-black font-black rounded-md px-2.5 py-1 text-xs uppercase shadow-[2px_2px_0px_rgba(0,0,0,1)] tracking-wider">
+                {roomCode}
+              </div>
+            )}
+            <div className="bg-[#A3E681] border-4 border-black font-black rounded-full px-4 py-2 shadow-brutal text-center text-sm uppercase leading-tight">
+              +{points} Points
+            </div>
           </div>
         </div>
 
